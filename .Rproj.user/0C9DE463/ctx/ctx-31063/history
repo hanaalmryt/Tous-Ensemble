@@ -1,0 +1,512 @@
+y = "EMM ± SE") +
+theme_minimal()
+ggsave(filename = file.path(plot_path, paste0(file_prefix, "_", dv, "_EMM_TimeInGroup.png")),
+plot = plot_time, width = 6, height = 4)
+}
+if (!is.null(emms_group$emmeans)) {
+plot_group <- as.data.frame(emms_group$emmeans) %>%
+ggplot(aes(x = !!sym(group_col), y = emmean, fill = Time)) +
+geom_col(position = position_dodge()) +
+geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE),
+position = position_dodge(0.9), width = 0.2) +
+labs(title = paste("Estimated Marginal Means for", dv),
+y = "EMM ± SE") +
+theme_minimal()
+ggsave(filename = file.path(plot_path, paste0(file_prefix, "_", dv, "_EMM_GroupInTime.png")),
+plot = plot_group, width = 6, height = 4)
+}
+}
+# Save workbook
+saveWorkbook(wb, file.path(table_path, paste0(file_prefix, ".xlsx")), overwrite = TRUE)
+message("Saved post hoc results and plots to: ", table_path)
+return(results)
+}
+# For positive interaction results after running ANCOVA
+run_posthoc_ancova <- function(df, dvs, covariate) {
+# Identifying dynamic columns
+group_col <- intersect(c("Group", "group"), colnames(df))[1]
+id_col <- intersect(c("TeamID", "PersonID"), colnames(df))[1]
+# Ensuring factors
+df$Time <- factor(df$Time, levels = c("T1", "T2", "T3"))
+df[[group_col]] <- factor(df[[group_col]])
+df[[id_col]] <- factor(df[[id_col]])
+df$DV <- factor(df$DV)
+# Output paths
+table_path <- glue("Output/Ind/Tables/T1_T2_T3/Posthoc_ANCOVA/CUQ_adjusted")
+plot_path <- glue("Output/Ind/Plots/T1_T2_T3/Posthoc_ANCOVA/CUQ_adjusted")
+dir.create(table_path, recursive = TRUE, showWarnings = FALSE)
+dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
+wb <- createWorkbook()
+for (dv in dvs) {
+cat("Processing ANCOVA Posthoc for:", dv, "\n")
+df <- df %>% filter(DV == dv)
+if (!covariate %in% colnames(df)) {
+warning(paste("Covariate", covariate, "missing in data for DV", dv))
+next
+}
+df_dv <- df[df$DV == dv & !is.na(df$Score) & !is.na(df[[covariate]]), ]
+# Fitting LMM with covariate
+model_formula <- as.formula(paste0("Score ~ Time * ", group_col, " + ", covariate, " + (1 | ", id_col, ")"))
+model <- tryCatch({
+lmer(model_formula, data = df)
+}, error = function(e) {
+warning(paste("Model failed for", dv, ":", e$message))
+return(NULL)
+})
+if (is.null(model)) next
+# Posthoc comparisons
+emmeans_time_by_group <- emmeans(model, pairwise ~ Time | .data[[group_col]])
+emmeans_group_by_time <- emmeans(model, pairwise ~ .data[[group_col]] | Time)
+# Saving results to Excel
+addWorksheet(wb, paste0(dv, "_Time_by_Group"))
+writeData(wb, paste0(dv, "_Time_by_Group"), summary(emmeans_time_by_group$contrasts))
+addWorksheet(wb, paste0(dv, "_Group_by_Time"))
+writeData(wb, paste0(dv, "_Group_by_Time"), summary(emmeans_group_by_time$contrasts))
+# Plot interaction with covariate adjustment
+emmeans_df <- as.data.frame(emmeans(model, ~ Time * .data[[group_col]]))
+interaction_plot <- ggplot(emmeans_df, aes(x = Time, y = emmean, color = .data[[group_col]], group = .data[[group_col]])) +
+geom_line(size = 1.2) +
+geom_point(size = 3) +
+geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.15) +
+theme_minimal() +
+labs(title = paste("Interaction (ANCOVA-adjusted):", dv),
+y = "Adjusted Estimated Marginal Mean",
+x = "Time") +
+theme(legend.position = "bottom")
+ggsave(file.path(plot_path, paste0("ANCOVA_interaction_", dv, ".png")),
+plot = interaction_plot, width = 6, height = 4)
+}
+# Save Excel workbook
+if (length(wb$sheet_names) > 0) {
+saveWorkbook(wb, file.path(table_path, "CUQ_adjusted_T1_T2_T3_ANCOVA_posthoc_results.xlsx"), overwrite = TRUE)
+cat("All ANCOVA post hoc results saved to", table_path, "\n")
+} else {
+warning("No valid post hoc comparisons were generated; workbook not saved.")
+}
+}
+# Running the post hoc tests for z_BPNSFS_Comp, z_WHOQOL_T, z_WHOQOL_G, z_WHOQOL_Phy
+# After ANOVA
+ind_CUQ_adj_long_agg %>%
+filter(DV %in% c("z_WHOQOL_T", "z_WHOQOL_G")) %>%
+filter(!is.na(Score), !is.na(CUQ)) %>%
+group_by(DV) %>%
+summarise(n = n())
+# Dependencies
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/04_analysis_T1_T2.R")
+# Z-scored datasets loading
+full_T1_T2_T3 <- readxl::read_excel("Data/Processed/Team/T1_T2_T3/teams_T1_T2_T3_all.xlsx")
+ind_full_T1_T2_T3 <- readxl::read_excel("Data/Processed/Ind/T1_T2_T3/ind_T1_T2_T3_all.xlsx")
+# Group column addition
+full_T1_T2_T3 <- add_group(full_T1_T2_T3)
+PEDSQL_ele_T1_T2_T3 <- add_group(PEDSQL_ele_T1_T2_T3)
+PEDSQL_par_T1_T2_T3 <- add_group(PEDSQL_par_T1_T2_T3)
+PEDSQL_T1_T2_T3 <- add_group(PEDSQL_T1_T2_T3)
+# Domain aggregation (Relations, Burden/Burnout)
+# Team
+full_T1_T2_T3 <- aggregate_domains_clean(full_T1_T2_T3, timepoints = c("T1", "T2", "T3"))
+# Individual
+ind_full_T1_T2_T3_agg <- aggregate_domains_clean(ind_T1_T2_T3_all, timepoints = c("T1", "T2", "T3"))
+# # Saving T1 -> T2 -> T3 dataset
+#   saveRDS(full_T1_T2_T3, "Data/Processed/full_T1_T2_T3_agg_grouped.rds")
+#   write_xlsx(full_T1_T2_T3, "Data/Processed/full_T1_T2_T3_agg_grouped.xlsx")
+#
+# Reshaping to long format
+# Team
+long_T1_T2_T3 <- reshape_long(full_T1_T2_T3)
+long_PEDSQL_ele_T1_T2_T3 <- reshape_long(PEDSQL_ele_T1_T2_T3)
+long_PEDSQL_par_T1_T2_T3 <- reshape_long(PEDSQL_par_T1_T2_T3)
+long_PEDSQL_T1_T2_T3 <- reshape_long(PEDSQL_T1_T2_T3)
+# Individual
+ind_long_T1_T2_T3 <- reshape_long(ind_full_T1_T2_T3_agg)
+ind_long_PEDSQL_ele_T1_T2_T3 <- reshape_long(PEDSQL_ele_ind_T1_T2_T3)
+ind_long_PEDSQL_par_T1_T2_T3 <- reshape_long(PEDSQL_par_ind_T1_T2_T3)
+ind_CUQ_adj_long <- reshape_long_with_cuq(ind_full_T1_T2_T3, cuq_time = "T1", covariate_prefix = "z_CUQ")
+ind_CUQ_adj_long_agg <- reshape_long_with_cuq(ind_full_T1_T2_T3_agg, cuq_time = "T1", covariate_prefix = "z_CUQ")
+# ANOVA + Levene
+# Team
+# run_anova(long_T1_T2_T3, analysis_prefix = "Team", output_prefix = "T1_T2_T3", ds_prefix = "z_scored", time_levels = c("T1", "T2", "T3"))
+# run_anova(long_PEDSQL_ele_T1_T2_T3, analysis_prefix = "Team", output_prefix = "T1_T2_T3", ds_prefix = "PEDSQL_ele", time_levels = c("T1", "T2", "T3"))
+# run_anova(long_PEDSQL_par_T1_T2_T3, analysis_prefix = "Team", output_prefix = "T1_T2_T3", ds_prefix = "PEDSQL_par", time_levels = c("T1", "T2", "T3"))
+# run_anova(long_PEDSQL_T1_T2_T3, analysis_prefix = "Team", output_prefix = "T1_T2_T3", ds_prefix = "PEDSQL", time_levels = c("T1", "T2", "T3"))
+#
+# Individual
+# run_anova(ind_long_T1_T2_T3, analysis_prefix = "Ind", output_prefix = "T1_T2_T3", ds_prefix = "z_scored", time_levels = c("T1", "T2", "T3"))
+# run_anova(ind_long_PEDSQL_ele_T1_T2_T3, analysis_prefix = "Ind", output_prefix = "T1_T2_T3", ds_prefix = "PEDSQL_ele", time_levels = c("T1", "T2", "T3"))
+# run_anova(ind_long_PEDSQL_par_T1_T2_T3, analysis_prefix = "Ind", output_prefix = "T1_T2_T3", ds_prefix = "PEDSQL_par", time_levels = c("T1", "T2", "T3"))
+# ANCOVA
+# Individual
+# write_xlsx(ind_CUQ_adj_long, "Data/Processed/Ind/T1_T2_T3/ind_CUQ_adj_long.xlsx")
+# run_anova(ind_CUQ_adj_long_agg, analysis_prefix = "Ind", output_prefix = "T1_T3", ds_prefix = "CUQ_adjusted_agg", time_levels = c("T1", "T2", "T3"))
+# Post hoc tests
+# For positive interaction results after running ANOVA
+run_posthoc_anova <- function(df, dvs) {
+# Identifying Group and ID columns
+group_col <- intersect(c("Group", "group"), colnames(df))[1]
+id_col <- intersect(c("TeamID", "PersonID"), colnames(df))[1]
+plot_path = "Output/Ind/Plots/T1_T2_T3/Posthoc_ANCOVA"
+table_path = "Output/Ind/Tables/T1_T2_T3/Posthoc_ANCOVA"
+file_prefix = "posthoc_results"
+dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
+dir.create(table_path, recursive = TRUE, showWarnings = FALSE)
+wb <- createWorkbook()
+results <- list()
+for (dv in dvs) {
+message("Processing DV: ", dv)
+df_dv <- df %>%
+filter(DV == dv) %>%
+drop_na(Score)
+if (nrow(df_dv) < 3) {
+warning(paste("Not enough data for", dv))
+next
+}
+# Fitting mixed model
+formula <- as.formula(paste0("Score ~ Time * ", group_col, " + (1|", id_col, ")"))
+model <- tryCatch({
+lme4::lmer(formula, data = df_dv, REML = FALSE)
+}, error = function(e) {
+warning(paste("Model failed for", dv, ":", e$message))
+return(NULL)
+})
+if (is.null(model)) next
+# Post hoc: Time within each Group
+emms_time <- tryCatch({
+emmeans(model, pairwise ~ Time | !!sym(group_col), adjust = "bonferroni")
+}, error = function(e) {
+warning(paste("EMMs by Time failed for", dv))
+NULL
+})
+# Post hoc: Group within each Time
+emms_group <- tryCatch({
+emmeans(model, pairwise ~ !!sym(group_col) | Time, adjust = "bonferroni")
+}, error = function(e) {
+warning(paste("EMMs by Group failed for", dv))
+NULL
+})
+# Results storage
+results[[dv]] <- list(
+Time_within_Group = emms_time,
+Group_within_Time = emms_group
+)
+## Write to Excel
+if (!is.null(emms_time$contrasts)) {
+addWorksheet(wb, paste0(dv, "_TimeInGroup"))
+writeData(wb, sheet = paste0(dv, "_TimeInGroup"), x = as.data.frame(emms_time$contrasts))
+}
+if (!is.null(emms_group$contrasts)) {
+addWorksheet(wb, paste0(dv, "_GroupInTime"))
+writeData(wb, sheet = paste0(dv, "_GroupInTime"), x = as.data.frame(emms_group$contrasts))
+}
+## Plotting EMMs
+if (!is.null(emms_time$emmeans)) {
+plot_time <- as.data.frame(emms_time$emmeans) %>%
+ggplot(aes(x = Time, y = emmean, color = !!sym(group_col), group = !!sym(group_col))) +
+geom_line(position = position_dodge(0.3)) +
+geom_point(position = position_dodge(0.3), size = 3) +
+geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.1,
+position = position_dodge(0.3)) +
+labs(title = paste("Estimated Marginal Means for", dv),
+y = "EMM ± SE") +
+theme_minimal()
+ggsave(filename = file.path(plot_path, paste0(file_prefix, "_", dv, "_EMM_TimeInGroup.png")),
+plot = plot_time, width = 6, height = 4)
+}
+if (!is.null(emms_group$emmeans)) {
+plot_group <- as.data.frame(emms_group$emmeans) %>%
+ggplot(aes(x = !!sym(group_col), y = emmean, fill = Time)) +
+geom_col(position = position_dodge()) +
+geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE),
+position = position_dodge(0.9), width = 0.2) +
+labs(title = paste("Estimated Marginal Means for", dv),
+y = "EMM ± SE") +
+theme_minimal()
+ggsave(filename = file.path(plot_path, paste0(file_prefix, "_", dv, "_EMM_GroupInTime.png")),
+plot = plot_group, width = 6, height = 4)
+}
+}
+# Save workbook
+saveWorkbook(wb, file.path(table_path, paste0(file_prefix, ".xlsx")), overwrite = TRUE)
+message("Saved post hoc results and plots to: ", table_path)
+return(results)
+}
+# For positive interaction results after running ANCOVA
+run_posthoc_ancova <- function(df, dvs, covariate) {
+# Identifying dynamic columns
+group_col <- intersect(c("Group", "group"), colnames(df))[1]
+id_col <- intersect(c("TeamID", "PersonID"), colnames(df))[1]
+# Ensuring factors
+df$Time <- factor(df$Time, levels = c("T1", "T2", "T3"))
+df[[group_col]] <- factor(df[[group_col]])
+df[[id_col]] <- factor(df[[id_col]])
+df$DV <- factor(df$DV)
+# Output paths
+table_path <- glue("Output/Ind/Tables/T1_T2_T3/Posthoc_ANCOVA/CUQ_adjusted")
+plot_path <- glue("Output/Ind/Plots/T1_T2_T3/Posthoc_ANCOVA/CUQ_adjusted")
+dir.create(table_path, recursive = TRUE, showWarnings = FALSE)
+dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
+wb <- createWorkbook()
+for (dv in dvs) {
+cat("Processing ANCOVA Posthoc for:", dv, "\n")
+df <- df %>% filter(DV == dv)
+if (!covariate %in% colnames(df)) {
+warning(paste("Covariate", covariate, "missing in data for DV", dv))
+next
+}
+df_dv <- df[df$DV == dv & !is.na(df$Score) & !is.na(df[[covariate]]), ]
+# Fitting LMM with covariate
+model_formula <- as.formula(paste0("Score ~ Time * ", group_col, " + ", covariate, " + (1 | ", id_col, ")"))
+model <- tryCatch({
+lmer(model_formula, data = df)
+}, error = function(e) {
+warning(paste("Model failed for", dv, ":", e$message))
+return(NULL)
+})
+if (is.null(model)) next
+# Posthoc comparisons
+emmeans_time_by_group <- emmeans(model, pairwise ~ Time | .data[[group_col]])
+emmeans_group_by_time <- emmeans(model, pairwise ~ .data[[group_col]] | Time)
+# Saving results to Excel
+addWorksheet(wb, paste0(dv, "_Time_by_Group"))
+writeData(wb, paste0(dv, "_Time_by_Group"), summary(emmeans_time_by_group$contrasts))
+addWorksheet(wb, paste0(dv, "_Group_by_Time"))
+writeData(wb, paste0(dv, "_Group_by_Time"), summary(emmeans_group_by_time$contrasts))
+# Plot interaction with covariate adjustment
+emmeans_df <- as.data.frame(emmeans(model, ~ Time * .data[[group_col]]))
+interaction_plot <- ggplot(emmeans_df, aes(x = Time, y = emmean, color = .data[[group_col]], group = .data[[group_col]])) +
+geom_line(size = 1.2) +
+geom_point(size = 3) +
+geom_errorbar(aes(ymin = emmean - SE, ymax = emmean + SE), width = 0.15) +
+theme_minimal() +
+labs(title = paste("Interaction (ANCOVA-adjusted):", dv),
+y = "Adjusted Estimated Marginal Mean",
+x = "Time") +
+theme(legend.position = "bottom")
+ggsave(file.path(plot_path, paste0("ANCOVA_interaction_", dv, ".png")),
+plot = interaction_plot, width = 6, height = 4)
+}
+# Save Excel workbook
+if (length(wb$sheet_names) > 0) {
+saveWorkbook(wb, file.path(table_path, "CUQ_adjusted_T1_T2_T3_ANCOVA_posthoc_results.xlsx"), overwrite = TRUE)
+cat("All ANCOVA post hoc results saved to", table_path, "\n")
+} else {
+warning("No valid post hoc comparisons were generated; workbook not saved.")
+}
+}
+# Running the post hoc tests for z_BPNSFS_Comp, z_WHOQOL_T, z_WHOQOL_G, z_WHOQOL_Phy
+# After ANOVA
+table(ind_CUQ_adj_long_agg$DV)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+install.packages("Matrix", dependencies = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+install.packages("openxlsx", dependencies = TRUE)
+install.packages("glue", dependencies = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+# Package installation
+# install.packages("readxl", dependencies = TRUE)        # Read Excel files
+# install.packages("writexl", dependencies = TRUE)       # Write Excel files
+# install.packages("openxlsx", dependencies = TRUE)      # Open Excel files
+# install.packages("dplyr", dependencies = TRUE)         # Data manipulation
+# install.packages("writexl", dependencies = TRUE)       # Save data back to Excel
+# install.packages("tidyverse", dependencies = TRUE)     # Data processing
+# install.packages("rstatix", dependencies = TRUE)       # Basic statistical tests
+# install.packages("psych", dependencies = TRUE)         # Psychometrics and survey analysis
+# install.packages("lubridate", dependencies = TRUE)     # Handling of dates
+# install.packages("ggplot2", dependencies = TRUE)       # Enhanced data visualisation
+# install.packages("purrr", dependencies = TRUE)         # Function application to objets
+# install.packages("afex", dependencies = TRUE)          # ANOVAs
+# install.packages("afex", dependencies = TRUE)          # Post hoc comparisons among groups after fitting a model
+# install.packages("ez", dependencies = TRUE)            # Easy analysis and visualization of factorial experiments
+# install.packages("ggpubr", dependencies = TRUE)        # Easy-to-use functions for creating and customizing 'ggplot2'- based publication ready plots
+# install.packages("tidyr", dependencies = TRUE)         # Transforms data frames to and from tidy data
+# install.packages("glue", dependencies = TRUE)          # Implementation of interpreted string literals
+# install.packages("Matrix", dependencies = TRUE)        # Sparse and dense matrix classes and methods
+# Packages loading
+library(readxl)
+library(writexl)
+library(openxlsx)
+library(dplyr)
+library(tidyverse)
+library(rstatix)
+library(psych)
+library(lubridate)
+library(ggplot2)
+library(purrr)
+library(afex)
+library(emmeans)
+library(ez)
+library(ggpubr)
+library(tidyr)
+library(glue)
+# Solving current bug with Matrix package
+remove.packages("Matrix")
+remove.packages("lme4")
+install.packages("lme4", type = "source")
+library(lme4)
+install.packages("lme4", type = "source")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+install.packages("lme4", type = "source")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+# Dependencies
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/04_analysis_T1_T2.R")
+oo <- options(repos = "https://cran.r-project.org/")
+utils::install.packages("Matrix")
+utils::install.packages("lme4")
+options(oo)
+# Dependencies
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/04_analysis_T1_T2.R")
+# Z-scored datasets loading
+full_T1_T2_T3 <- readxl::read_excel("Data/Processed/Team/T1_T2_T3/teams_T1_T2_T3_all.xlsx")
+ind_full_T1_T2_T3 <- readxl::read_excel("Data/Processed/Ind/T1_T2_T3/ind_T1_T2_T3_all.xlsx")
+# Group column addition
+full_T1_T2_T3 <- add_group(full_T1_T2_T3)
+PEDSQL_ele_T1_T2_T3 <- add_group(PEDSQL_ele_T1_T2_T3)
+PEDSQL_par_T1_T2_T3 <- add_group(PEDSQL_par_T1_T2_T3)
+PEDSQL_T1_T2_T3 <- add_group(PEDSQL_T1_T2_T3)
+# Domain aggregation (Relations, Burden/Burnout)
+# Team
+full_T1_T2_T3 <- aggregate_domains_clean(full_T1_T2_T3, timepoints = c("T1", "T2", "T3"))
+# Individual
+ind_full_T1_T2_T3_agg <- aggregate_domains_clean(ind_T1_T2_T3_all, timepoints = c("T1", "T2", "T3"))
+# # Saving T1 -> T2 -> T3 dataset
+#   saveRDS(full_T1_T2_T3, "Data/Processed/full_T1_T2_T3_agg_grouped.rds")
+#   write_xlsx(full_T1_T2_T3, "Data/Processed/full_T1_T2_T3_agg_grouped.xlsx")
+#
+# Reshaping to long format
+# Team
+long_T1_T2_T3 <- reshape_long(full_T1_T2_T3)
+long_PEDSQL_ele_T1_T2_T3 <- reshape_long(PEDSQL_ele_T1_T2_T3)
+long_PEDSQL_par_T1_T2_T3 <- reshape_long(PEDSQL_par_T1_T2_T3)
+long_PEDSQL_T1_T2_T3 <- reshape_long(PEDSQL_T1_T2_T3)
+# Individual
+ind_long_T1_T2_T3 <- reshape_long(ind_full_T1_T2_T3_agg)
+ind_long_PEDSQL_ele_T1_T2_T3 <- reshape_long(PEDSQL_ele_ind_T1_T2_T3)
+ind_long_PEDSQL_par_T1_T2_T3 <- reshape_long(PEDSQL_par_ind_T1_T2_T3)
+ind_CUQ_adj_long <- reshape_long_with_cuq(ind_full_T1_T2_T3, cuq_time = "T1", covariate_prefix = "z_CUQ")
+ind_CUQ_adj_long_agg <- reshape_long_with_cuq(ind_full_T1_T2_T3_agg, cuq_time = "T1", covariate_prefix = "z_CUQ")
+write_xlsx(ind_CUQ_adj_long_agg, "Data/Processed/Ind/T1_T2_T3/ind_CUQ_adj_long_agg.xlsx")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+install.packages("Matrix", dependencies = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+install.packages("Matrix", dependencies = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+R.version.string*
+R.version.string
+packageVersion("Matrix")
+packageVersion("lme4")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+warnings()
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+install.packages("lme4", type = "source")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+warnings()
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/05_analysis_T1_T2_T3.R", echo = TRUE)
+install.packages("lme4", type = "source")
+# Dependencies
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/04_analysis_T1_T2.R")
+remove.packages(c("lme4", "Matrix"))
+install.packages(c("lme4", "Matrix"))
+# Dependencies
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/04_analysis_T1_T2.R")
+R.version.string
+install.packages("remotes")
+# Package installation
+# install.packages("readxl", dependencies = TRUE)        # Read Excel files
+# install.packages("writexl", dependencies = TRUE)       # Write Excel files
+# install.packages("openxlsx", dependencies = TRUE)      # Open Excel files
+# install.packages("dplyr", dependencies = TRUE)         # Data manipulation
+# install.packages("writexl", dependencies = TRUE)       # Save data back to Excel
+# install.packages("tidyverse", dependencies = TRUE)     # Data processing
+# install.packages("rstatix", dependencies = TRUE)       # Basic statistical tests
+# install.packages("psych", dependencies = TRUE)         # Psychometrics and survey analysis
+# install.packages("lubridate", dependencies = TRUE)     # Handling of dates
+# install.packages("ggplot2", dependencies = TRUE)       # Enhanced data visualisation
+# install.packages("purrr", dependencies = TRUE)         # Function application to objets
+# install.packages("afex", dependencies = TRUE)          # ANOVAs
+# install.packages("afex", dependencies = TRUE)          # Post hoc comparisons among groups after fitting a model
+# install.packages("ez", dependencies = TRUE)            # Easy analysis and visualization of factorial experiments
+# install.packages("ggpubr", dependencies = TRUE)        # Easy-to-use functions for creating and customizing 'ggplot2'- based publication ready plots
+# install.packages("tidyr", dependencies = TRUE)         # Transforms data frames to and from tidy data
+# install.packages("glue", dependencies = TRUE)          # Implementation of interpreted string literals
+# install.packages("Matrix", dependencies = TRUE)        # Sparse and dense matrix classes and methods
+# Packages loading
+library(readxl)
+library(writexl)
+library(openxlsx)
+library(dplyr)
+library(tidyverse)
+library(rstatix)
+library(psych)
+library(lubridate)
+library(ggplot2)
+library(purrr)
+library(afex)
+library(emmeans)
+library(ez)
+library(ggpubr)
+library(tidyr)
+library(glue)
+# Solving issue with the 'Matrix' package
+remotes::install_version("Matrix", version = "1.5-1", repos = "http://cran.us.r-project.org")
+# Package installation
+# install.packages("readxl", dependencies = TRUE)        # Read Excel files
+# install.packages("writexl", dependencies = TRUE)       # Write Excel files
+# install.packages("openxlsx", dependencies = TRUE)      # Open Excel files
+# install.packages("dplyr", dependencies = TRUE)         # Data manipulation
+# install.packages("writexl", dependencies = TRUE)       # Save data back to Excel
+# install.packages("tidyverse", dependencies = TRUE)     # Data processing
+# install.packages("rstatix", dependencies = TRUE)       # Basic statistical tests
+# install.packages("psych", dependencies = TRUE)         # Psychometrics and survey analysis
+# install.packages("lubridate", dependencies = TRUE)     # Handling of dates
+# install.packages("ggplot2", dependencies = TRUE)       # Enhanced data visualisation
+# install.packages("purrr", dependencies = TRUE)         # Function application to objets
+# install.packages("afex", dependencies = TRUE)          # ANOVAs
+# install.packages("afex", dependencies = TRUE)          # Post hoc comparisons among groups after fitting a model
+# install.packages("ez", dependencies = TRUE)            # Easy analysis and visualization of factorial experiments
+# install.packages("ggpubr", dependencies = TRUE)        # Easy-to-use functions for creating and customizing 'ggplot2'- based publication ready plots
+# install.packages("tidyr", dependencies = TRUE)         # Transforms data frames to and from tidy data
+# install.packages("glue", dependencies = TRUE)          # Implementation of interpreted string literals
+# install.packages("Matrix", dependencies = TRUE)        # Sparse and dense matrix classes and methods
+# Packages loading
+library(readxl)
+library(writexl)
+library(openxlsx)
+library(dplyr)
+library(tidyverse)
+library(rstatix)
+library(psych)
+library(lubridate)
+library(ggplot2)
+library(purrr)
+library(afex)
+library(emmeans)
+library(ez)
+library(ggpubr)
+library(tidyr)
+library(glue)
+# Solving issue with the 'Matrix' package
+remotes::install_version("Matrix", version = "1.5-4", repos = "http://cran.us.r-project.org")
+source("C:/Users/isaintsu/Desktop/Tous-Ensemble/Scripts/01_load_libraries.R", echo = TRUE)
+warnings()
+remove.packages("Matrix")
+remotes::install_version("Matrix", version = "1.5-4", repos = "http://cran.us.r-project.org")

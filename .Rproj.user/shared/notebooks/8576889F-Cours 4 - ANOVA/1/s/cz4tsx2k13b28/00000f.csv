@@ -1,0 +1,11 @@
+"0","str(plant)"
+"2","G1;Erreur : objet 'plant' introuvable
+Erreur pendant l'emballage (wrapup) : il n'y a pas autant de trames dans la pile
+Erreur : plus de gestionnaire d’erreur disponible (erreurs récursives ?) ; appel d’un redémarrage de type 'abort'
+g"
+"0","glimpse(plant)"
+"2","G1;Erreur : objet 'plant' introuvable
+g"
+"2","G1;Erreur pendant l'emballage (wrapup) : il n'y a pas autant de trames dans la pile
+Erreur : plus de gestionnaire d’erreur disponible (erreurs récursives ?) ; appel d’un redémarrage de type 'abort'
+g"

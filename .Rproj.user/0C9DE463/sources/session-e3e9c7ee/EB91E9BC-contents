@@ -1,0 +1,2062 @@
+---
+title: "ANOVA"
+author: "Cécile Mazon"
+date: '2022-11-08'
+output: 
+  html_document:
+    toc: TRUE
+    toc_depth: 3
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      warning = FALSE)
+options(tibble.width = Inf) # displays all columns.
+options(tibble.print_max = Inf) # to show all the rows.
+library(broom)
+library(car)
+library(emmeans)
+library(rstatix)
+library(datarium)
+library(tidyverse)
+library(ggpubr)
+library(psych)
+library(GGally)
+```
+
+Ce document est réservé à l'usage privé des étudiants du Master Sciences Cognitives et Ergonomie, parcours TECH, en complément des cours dispensés. Il ne doit pas être diffusé en dehors de cet usage.
+
+L'objectif de ce document est de fournir un résumé du cours et un modèle de document Rmarkdown.
+
+**Remarque importante** : Pour chaque procédure, je propose à chaque fois plusieurs alternatives de code. En général, vous avez une version de code utilisant les fonctions "classiques" de R, et une version utilisant l'environnement "tidyverse", qui à mon sens, propose des syntaxes plus lisibles et plus faciles à utiliser (une fois qu'on s'y est habitué ;-) )
+
+# Introduction
+
+Les analyses de variance permettent de comparer plusieurs moyennes pour déterminer si elles sont significativement différentes ou non.
+
+Le principe est de comparer le comportement d'une variable quantitative (la VD) en fonction des modalités d'une ou plusieurs variables qualitatives (VI).
+
+Il existe plusieurs tests permettant de réaliser une analyse de variance. Le choix dépendra de plusieurs critères :
+
+1.  **La normalité des distributions.** On utilisera des tests paramétriques lorsque les distributions sont normalement distribuées (*i.e.*, les données suivent une loi Normale)
+2.  **Le nombre de modalités à comparer.** On n'utilisera pas les mêmes tests lorsqu'on compare deux moyennes vs. plus de deux moyennes
+3.  **Le type de facteur (VI).** Les analyses de variance sont différentes si on compare des groupes indépendants (VI intergroupe) ou des groupes dits appariés (VI intragroupe).
+
+Quelle que soit l'analyse utilisée, on suivra plus ou moins la même procédure :
+
+1.  Nettoyage et préparation des données
+2.  Vérification des conditions d'application
+3.  Statistiques descriptives et représentations graphiques
+4.  Réalisation du test statistique
+5.  Tests post-hoc (le cas échéant)
+
+# Comparaison de plus de deux moyennes
+
+Le test ANOVA est utilisé lorsque vous souhaitez comparer plus de deux moyennes.
+
+L'ANOVA peut être réalisée avec **1, 2 ou 3 facteur(s)**, et chacun de ces facteurs peut être **intergroupe** (*between-subject*) ou **intragroupe** (*within-subject*).
+
+En fonction du type de facteur(s) employés dans l'analyse, on distinguera :
+
+-   Les **ANOVA inter-sujets**, qui ne contiennent que des facteurs intergroupes
+
+-   Les **ANOVA à mesures répétées (intra-sujets)** qui ne contiennent que des facteurs intragroupes
+
+-   Les **ANOVA mixtes** qui contiennent les deux types de facteurs.
+
+Cette distinction est importante parce que c'est ce qui va définir les conditions d'application de l'analyse.
+
+Pour ce qui est de la réalisation de l'analyse, elle se déroule selon les mêmes étapes que pour le test t des Student, à la différence qu'on ajoutera en général **une phase de tests post-hoc**. Ces derniers consistent à faire des comparaisons de moyennes deux à deux pour examiner en détail les effets globaux et/ou d'interaction mis en évidence dans l'analyse.
+
+## L'analyse de variance (ANOVA) à 1 facteur
+
+### ANOVA à 1 facteur inter-sujet
+
+**L'ANOVA à 1 facteur inter-sujet** (*One-way between-subject ANOVA*) permet de comparer les moyennes issues de plus de deux échantillons non-liés (i.e., composés d'individus différents). Il est utilisé dans le cas où vous avez une expérience avec une **VI intergroupe à plus de 2 modalités**.
+
+**Jeu de données utilisé**
+
+Pour l'exemple, on va prendre le jeu de données `PlantGrowth`, qui contient le poids de plantes en fonction du traitement administré.
+
+```{r}
+head(PlantGrowth)
+
+#Ajout d'une colonne avec un identifiant
+plant <- cbind(ID = 1:30, PlantGrowth)
+plant <- transform(plant, ID = as.factor(ID))
+```
+
+Ce jeu de données contient deux variables :
+
+-   `weight` : le poids des plantes en grammes (VD)
+
+-   `group` : la variable de regroupement (VI intergroupe) à 3 modalités : Contrôle, Traitement 1, Traitement 2
+
+La variable `group` est **une variable intergroupe**, puisque chaque individu n'appartient qu'à un seul groupe (ils ne passent donc qu'une modalité de la variable).
+
+On va donc réaliser une ANOVA à 1 facteur inter-sujet pour évaluer l'effet du traitement sur la prise de poids des plantes.
+
+```{r}
+str(plant)
+glimpse(plant)
+```
+
+#### 1. Vérification des conditions d'application
+
+<u> Conditions d'application :</u> Elles sont identiques à celles d'un test t pour éch. indépendants
+
+1.  **Indépendance des observations** : Chaque individu appartient à un seul groupe. Il n'y a pas de relations entre les observations de chaque groupe. Cette condition revient à s'assurer que la VI est bien intergroupe.
+
+2.  **Absence de valeurs aberrantes.** Les données de chaque groupe ne doivent pas contenir de valeurs aberrantes.
+
+3.  **Normalité de la distribution.** Les données de chaque groupe sont distribuées normalement.
+
+4.  **Homogénéité des variances.** Les variances de tous les groupes sont homogènes.
+
+##### Valeurs aberrantes
+
+Comme pour le t-test, on va examiner la présence de ces valeurs dans les données de chaque groupe séparément.
+
+```{r}
+#Boite à moustaches
+ggboxplot(plant, x = "group", y = "weight", 
+          add = "jitter", bxp.errorbar = TRUE)
+
+#Algorithme
+plant %>%
+  group_by(group) %>%
+  identify_outliers(weight)
+
+```
+
+**Interprétation :** Les valeurs aberrantes ne sont pas extrêmes, on va donc les conserver pour l'analyse.
+
+##### Normalité des distributions
+
+On examine la normalité de la distribution dans chaque groupe séparément.
+
+```{r, fig.show='hold', fig.asp=1, fig.width=4.5}
+#Diagramme QQ
+ggqqplot(plant, x = "weight", color = "group")
+
+ggqqplot(plant, x = "weight", facet.by = "group")
+```
+
+```{r}
+#En utilisant la fonction by() --> Syntaxe : by(VD, VI, test)
+by(plant$weight, plant$group, shapiro.test)
+
+#Alternative avec rstatix
+plant %>%
+  group_by(group) %>%
+  shapiro_test(weight)
+```
+
+**Interprétation :** La distribution dans chaque groupe est bien normale (tests de Shapiro, p \> .05), on peut donc continuer avec notre ANOVA.
+
+Lorsque les données ne sont pas normales, on fait comme pour le t-test : soit on garde l'ANOVA parce qu'elle peut résister à cette non-normalité, soit on utilise une alternative non-paramétrique, soit on transforme nos données.
+
+------------------------------------------------------------------------
+
+**Il existe une autre manière d'examiner la normalité de la distribution en analysant les résidus du** **modèle** : On utilise le diagramme QQ et le test de Shapiro, non pas sur chaque groupe séparément, mais sur les résidus du modèle ANOVA.\
+Cette approche peut être pratique lorsque vos échantillons sont petits.
+
+**Qu'est-ce qu'un résidu ?** Lorsqu'on réalise une ANOVA, on construit un modèle linéaire de notre phénomène. Autrement dit, on utilise les valeurs de notre/nos VI pour prédire la valeur de notre VD. Un modèle n'étant jamais parfait, la prédiction de la valeur de la VD implique une **erreur de prédiction**. Les résidus d'une ANOVA (ou d'une régression) désignent l'ensemble des erreurs de prédiction pour chaque observation de l'analyse. On peut aussi définir les résidus comme "la variance non expliquée par le modèle".
+
+```{r}
+# Création du modèle linéaire
+model <- lm(weight ~ group, data = plant)
+
+# QQ plot
+ggqqplot(residuals(model))
+
+#Test de Shapiro
+shapiro_test(residuals(model))
+```
+
+##### Homogénéité des variances
+
+Pour vérifier si les variances sont homogènes, on va utiliser le **test de Levene**. Comme pour les tests de normalité, on estimera que les variances sont homogènes lorsque la p-value est supérieure à .05, puisque son hypothèse nulle est que les variances ne sont pas différentes.
+
+```{r}
+# Fonction leveneTest (librairie car)
+leveneTest(weight ~ group, plant)
+
+# Fonction levene_test (librairie rstatix)
+levene_test(plant, weight ~ group)
+```
+
+**Interprétation** : La p-value étant supérieure à .05, on peut conclure que les variances sont homogènes.
+
+**Que faire si les variances ne sont pas homogènes ?\
+**La non-homogénéité des variances n'est pas un frein à l'utilisation d'un test ANOVA. Il existe une correction qui permet d'utiliser le test ANOVA en cas d'hétérogénéité des variances : **le test ANOVA avec correction de Welch.**\
+Il suffira de préciser dans les arguments de la fonction `welch_anova_test()`.
+
+#### 2. Statistiques descriptives et représentation graphique des données.
+
+**Statistiques descriptives**
+
+```{r mice stats-desc4}
+# Fonction de base pour obtenir des indicateurs statistiques
+summary(plant)
+
+# Fonctions renvoyant des données plus complètes
+  #Librarie rstatix
+    #Au global
+get_summary_stats(plant, type = "common")
+
+    #En fonction des modlités de la variable "supp"
+plant %>%
+  group_by(group) %>%
+  get_summary_stats(weight)
+
+  #Librarie psych
+describeBy(weight ~ group, data = plant)
+```
+
+On observe d'ores et déjà que le poids moyen est de 5.03 g (SD = 0.58) dans le groupe Contrôle, de 4.66 g (SD = 0.79) pour le groupe Trt1 et de 5.53 g (SD = 0.44) dans le groupe Trt2.
+
+**Représentation graphique**
+
+Quelques exemples de représentation graphique
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+ggline(plant, plot_type = "b", add = "mean_se", 
+       x = "group", y = "weight", linetype = 2, 
+       xlab = FALSE, ylab = "Poids des plantes (en g)")
+
+ggboxplot(plant, x = "group", y = "weight", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group",
+          ylab = "Poids des plantes (en g)", legend = "none")
+
+ggbarplot(plant, x = "group", y = "weight", add = "mean_se", 
+          palette = "Set1", fill = "group", ylab = "Poids des plantes (en g)",
+          legend = "none")
+```
+
+#### 3. Réalisation de l'ANOVA
+
+Nos conditions d'application étant vérifiées, nous pouvons réaliser l'ANOVA à 1 facteur. Nous souhaitons savoir si le poids des plantes est différent pour le groupe contrôle vs. trt1 vs. trt2.
+
+Version avec la fonction `aov()`
+
+```{r aov test}
+
+#Fonction aov (librairie stats)
+res.plant <- aov(weight ~ group, plant)
+summary(res.plant)
+
+
+```
+
+Version avec la fonction `anova_test()` de la librairie `rstatix` :
+
+```{r}
+#Fonction anova_test (librairie rstatix)
+  # Version avec la formule
+res.plant <- anova_test(plant, weight ~ group, detailed = TRUE)
+get_anova_table(res.plant)
+
+  # Version avec les arguments
+res.plant <- anova_test(plant, dv = weight, between = group, detailed = TRUE)
+get_anova_table(res.plant)
+```
+
+**Remarque**. Je vous conseille d'utiliser plutôt la fonction `anova_test()`, qui est beaucoup plus facile à utiliser, grâce à la possibilité d'indiquer vos différentes variables par des arguments. Nous verrons dans les sections suivantes que la fonction `aov()` peut être difficile à utiliser dans certains cas.
+
+**Interprétation de l'analyse (1) :**
+
+En observant les résultats du test ANOVA, on voit que pour **l'effet principal du groupe, la p-value est inférieure à .05**. On a donc un effet significatif de la condition, reste à savoir si toutes les moyennes sont différentes entre elles ou non.
+
+**La taille d'effet pour l'ANOVA nous est donnée par l'indicateur eta^2^**, qui s'interprète très simplement : $eta^2 = 0.26$ signifie que 26% de la variation du poids est attribuable aux conditions de traitement.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Ils consistent à faire **un ensemble de test-t entre les moyennes de chaque modalité deux à deux**, pour déterminer si elles sont significativement différentes les unes des autres. Comme il y a de multiples tests réalisés, on applique **une correction de la p-value**. Les tests les plus courants avec l'ANOVA sont les tests de Tukey HSD ou les comparaison avec correction de Bonferroni.
+
+```{r}
+# Comparaisons deux à deux avec la correction de Tukey
+pwc.plant <- tukey_hsd(plant,weight ~ group)
+pwc.plant
+
+# Comparaisons deux à deux avec la correction de Bonferroni
+pwc.plant <- pairwise_t_test(plant, weight ~ group, p.adjust.method = "bonferroni")
+pwc.plant
+
+```
+
+**Remarque.** Si les variances étaient hétérogènes et que vous avez utilisé une **Anova de Welch**, vous ne pouvez pas utiliser les fonctions ci-dessus pour les tests post-hoc. Vous pouvez néanmoins utiliser le **test de Games-Howell** : `games_howell_test(plant, weight ~ group)`.
+
+**Interprétation de l'analyse (2) :**
+
+Les tests post-hoc nous permettent de dire que **seule la différence entre trt1 et trt2 est significative** (les autres ne passent pas le seuil).
+
+#### 4. Reporter les résultats
+
+Pour reporter les résultats d'une analyse statistique :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Expliquer que l'effet principal du groupe est significatif : $F(2, 27) = 4.846, p < 0.05, 𝜂^2 = 0.26$.
+
+    -   La différence n'est significative qu'entre trt1 et trt2 (p. adj. \< .05). Cela signifie que le Traitement 2 produit de meilleurs résultats que le Traitement 1, mais qu'aucun des deux traitements ne produit de meilleurs effets que la condition Contrôle.
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, ecart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée (ici, ce n'est pas le cas, mais on le verra plus tard).
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+
+# Avec des boxplot et la fonction geom_bracket() qui permet de définir manuellement les marques pour les différences significatives
+ggboxplot(plant, x = "group", y = "weight", 
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group",
+          ylab = "Poids des plantes (en g)", 
+          ylim = c(3.5, 7), legend = "none") +
+  geom_bracket(
+    xmin = "trt1", xmax = "trt2", y.position = 6.5,
+    label = "*", tip.length = c(0.1, 0.02), label.size = 6
+  )
+
+# Avec des barplots et la fonction stat_pvalue_manuel() qui permet de définir automatiquement les marques pour les différences significatives
+pwc.plant <- pwc.plant %>% add_xy_position(x = "group")
+
+ggbarplot(plant, x = "group", y = "weight", add = "mean_se", 
+          palette = "Set1", fill = "group", 
+          xlab = "Groupe", ylab = "Poids des plantes (en g)",
+          legend = "none")  +
+  stat_pvalue_manual(pwc.plant, hide.ns = TRUE, y.position = 6)
+```
+
+### ANOVA à 1 facteur intra-sujet (mesures répétées)
+
+**L'ANOVA à 1 facteur intra-sujet** (*One-way within-subject ANOVA*) permet de comparer les moyennes issues de plus de deux échantillons appariés (i.e., composés des mêmes individus). Il est utilisé dans le cas où vous avez une expérience avec une **VI intragroupe à plus de 2 modalités**.
+
+**Jeu de données utilisé**
+
+On va prendre le jeu de données `selfesteem`, qui contient le score à un questionnaire d'estime de soi de 10 individus au cours du temps (trois temps de mesure : T1, T2, T3).
+
+```{r}
+head(selfesteem)
+```
+
+Ce jeu de données contient quatre variables :
+
+-   `id` : numéro d'identification de l'individu
+
+-   `t1`, `t2`, `t3` : score au 1er, au 2eme et au 3eme temps de mesure
+
+La variable `time` (que nous allons créer juste après) est **une variable intragroupe**, puisque tous les individus passent toutes ses modalités (t1, t2, t3). Autrement dit, on mesure le score d'estime de soi des individus aux trois temps de mesure (3 mesures répétées).
+
+On va donc réaliser une ANOVA à 1 facteur intra-sujet pour évaluer l'effet du temps sur le score d'estime de soi
+
+```{r}
+str(selfesteem)
+glimpse(selfesteem)
+```
+
+**Préparation du jeu de données**
+
+Comme pour le t-test pour échantillons appariés, la réalisation de l'analyse implique de créer un fichier avec une variable de regroupement et une seule colonne contenant la VD. On utilise à nouveau la fonction `gather()`.
+
+La colonne `id` est essentielle pour une analyse à mesures répétées, afin que le test puisse tenir compte de la variation intra-sujet (au sein d'un même individu). Cette colonne doit être transformée en facteur.
+
+```{r}
+selfesteem <- transform(selfesteem, id = as.factor(id))
+
+selfesteem.long <- selfesteem %>%
+  gather(key = "time", value = "score", t1, t2, t3, factor_key = TRUE)
+
+str(selfesteem.long)
+```
+
+#### 1. Vérification des conditions d'application
+
+<u> Conditions d'application :</u> Elles sont identiques à celles d'un test t pour éch. indépendants
+
+1.  **Appariement des observations** : Chaque individu a une mesure pour chaque modalité de la VI ; il y a autant de mesures par individu que de modalités dans la variable. Cette condition revient à s'assurer que la VI est bien intragroupe.
+
+2.  **Absence de valeurs aberrantes.** Les données de chaque groupe ne doivent pas contenir de valeurs aberrantes.
+
+3.  **Normalité de la distribution.** Les données de chaque groupe sont distribuées normalement.
+
+4.  **Sphéricité des variances.** L'hypothèse de sphéricité signifie que les variances des différences entre les conditions sont homogènes.
+
+##### Valeurs aberrantes
+
+On examine la présence de ces valeurs dans les données de chaque groupe séparément.
+
+```{r}
+#Boite à moustaches
+ggboxplot(selfesteem.long, x = "time", y = "score", 
+          add = "jitter", bxp.errorbar = TRUE)
+
+#Algorithme
+selfesteem.long %>%
+  group_by(time) %>%
+  identify_outliers(score)
+
+```
+
+**Interprétation :** Les valeurs aberrantes ne sont pas extrêmes, on va donc les conserver pour l'analyse.
+
+##### Normalité des distributions
+
+On examine la normalité de la distribution dans chaque groupe séparément.
+
+```{r, fig.show='hold', fig.asp=1, fig.width=4.5}
+#Diagramme QQ
+ggqqplot(selfesteem.long, x = "score", color = "time")
+
+ggqqplot(selfesteem.long, x = "score", facet.by = "time")
+```
+
+```{r}
+# On peut utiliser le fichier original pour faire un test par colonne
+shapiro.test(selfesteem$t1)
+shapiro.test(selfesteem$t2)
+shapiro.test(selfesteem$t3)
+
+#Ou utiliser la fonction by() sur selfesteem.long 
+# Syntaxe : by(selfesteem.long$score, selfesteem.long$time, shapiro.test)
+
+#Alternative avec rstatix
+selfesteem.long %>%
+  group_by(time) %>%
+  shapiro_test(score)
+```
+
+**Interprétation :** La distribution dans chaque groupe est bien normale (tests de Shapiro, p \> .05), on peut donc continuer avec notre ANOVA.
+
+**Lorsque les données ne sont pas normales,** on fait comme pour le t-test : soit on garde l'ANOVA parce qu'elle peut résister à cette non-normalité, soit on utilise une alternative non-paramétrique, soit on transforme nos données.
+
+##### Sphéricité
+
+Pour vérifier l'hypothèse de sphéricité, on va utiliser le **test de sphéricité de Mauchly**. Ce test consiste à évaluer si la variance des différences entre toutes les conditions sont homogènes.
+
+En utilisant la fonction `anova_test()` de rstatix, le test de sphéricité est compris dans la procédure. On verra dans la section de réalisation de l'analyse comment obtenir le résultat du test de Mauchly.
+
+**Que faire si la sphéricité n'est pas respectée ?\
+**Là encore, pas de panique, on peut quand même utiliser l'ANOVA, en appliquant des corrections. La plus courante est la **correction de Greenhouse-Geisser (GG)**, qu'on appliquera aux facteurs concernés par la violation de la sphéricité.
+
+En utilisant les fonctions proposées par `rstatix`, cette correction sera appliquée en ajoutant l'argument `correction = "auto"` dans la fonction `get_anova_table()`.
+
+#### 2. Statistiques descriptives et représentation graphique des données.
+
+**Statistiques descriptives**
+
+```{r}
+# Fonction de base pour obtenir des indicateurs statistiques
+summary(selfesteem.long)
+summary(selfesteem)
+
+# Fonctions renvoyant des données plus complètes
+  #Librarie rstatix
+    #Au global
+get_summary_stats(selfesteem.long, type = "common")
+
+    #En fonction des modlités de la variable "supp"
+selfesteem.long %>%
+  group_by(time) %>%
+  get_summary_stats(score)
+
+  #Librarie psych
+describeBy(score ~ time, data = selfesteem.long)
+```
+
+On observe d'ores et déjà que le score moyen est de 3.14 (SD = 0.55) à T1, de 4.93 (SD = 0.86) à T2 et de 7.64 (SD = 1.14) à T3.
+
+**Représentation graphique**
+
+Quelques exemples de représentation graphique
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+ggline(selfesteem.long, plot_type = "b", add = "mean_se", 
+       x = "time", y = "score", linetype = 2,
+       xlab = FALSE, ylab = "Score d'estime de soi")
+
+ggboxplot(selfesteem.long, x = "time", y = "score", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "time",
+          ylab = "Score d'estime de soi", legend = "none")
+
+ggbarplot(selfesteem.long, x = "time", y = "score", add = "mean_se", 
+          palette = "Set1", fill = "time", ylab = "Score d'estime de soi",
+          legend = "none")
+```
+
+#### 3. Réalisation de l'ANOVA
+
+Nos conditions d'application étant vérifiées, nous pouvons réaliser l'ANOVA à 1 facteur intra-sujet. Nous souhaitons savoir si le score d'estime de soi est différent entre T1, T2 et T3.
+
+Version avec la fonction `aov()` - Non recommandée
+
+```{r}
+#Fonction aov (librairie stats)
+res.se <- aov(score ~ time + Error(id/time), selfesteem.long)
+summary(res.se)
+```
+
+Version avec la fonction `anova_test()` de la librairie `rstatix` :
+
+```{r}
+#Fonction anova_test (librairie rstatix)
+  # Version avec la formule
+res.se <- anova_test(selfesteem.long, score ~ time + Error(id/time), detailed = TRUE)
+res.se
+get_anova_table(res.se, correction = "auto")
+
+  # Version avec les arguments
+res.se <- anova_test(selfesteem.long, dv = score, within = time, wid = id, detailed = TRUE)
+res.se
+get_anova_table(res.se, correction = "auto")
+```
+
+**Remarque**. Je vous conseille d'utiliser plutôt la fonction `anova_test()`, qui est beaucoup plus facile à utiliser, grâce à la possibilité d'indiquer vos différentes variables par des arguments. Nous verrons dans les sections suivantes que la fonction `aov()` peut être difficile à utiliser dans certains cas.
+
+**Interprétation de l'analyse (1) :**
+
+En observant les résultats du test ANOVA, on voit que pour **l'effet principal du temps, la p-value est inférieure à .05**. On a donc un effet significatif de la condition, reste à savoir si toutes les moyennes sont différentes entre elles ou non.
+
+**La taille d'effet pour l'ANOVA nous est donnée par l'indicateur eta^2^**, qui s'interprète très simplement : $eta^2 = 0.83$ signifie que 83% de la variation du score est attribuable aux conditions de traitement.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Ils consistent à faire **un ensemble de test-t entre les moyennes de chaque modalité deux à deux**, pour déterminer si elles sont significativement différentes les unes des autres. Comme il y a de multiples tests réalisés, on applique **une correction de la p-value**.
+
+Les tests les plus courants avec l'ANOVA à 1 facteur inter-sujet sont les tests de Tukey HSD ou les comparaisons avec correction de Bonferroni.
+
+```{r}
+# Comparaisons deux à deux avec la correction de Bonferroni
+pwc.se <- pairwise_t_test(selfesteem.long, score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwc.se
+
+```
+
+**Interprétation de l'analyse (2) :**
+
+Les tests post-hoc nous permettent de dire que **les trois différences sont significatives**. On peut donc conclure que le score s'améliore significativement entre T1 et T2, entre T2 et T3 et entre T1 et T3.
+
+#### 4. Reporter les résultats
+
+Pour reporter les résultats d'une analyse statistique :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Expliquer que l'effet principal du groupe est significatif : $F(2, 18) = 55.469, p < 0.001, 𝜂^2 = 0.83$.
+
+    -   Toutes les différences entre les modalités sont significatives (p. adj. \< .001). On a donc T1 \< T2 \< T3, ce qui signifie une amélioration de l'estime de soi à chaque temps de mesure.
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, ecart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée (ici, ce n'est pas le cas, mais on le verra plus tard).
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+
+# Avec des boxplot et la fonction geom_bracket() qui permet de définir manuellement les marques pour les différences significatives
+ggboxplot(selfesteem.long, x = "time", y = "score",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "time",
+          ylab = "Score d'estime de soi", legend = "none",
+          ylim = c(1.5, 13)) +
+  geom_bracket(
+    xmin = c("t1", "t2", "t1"), xmax = c("t2", "t3", "t3"), y.position = c(8, 11.5, 12.5),
+    label = "***", tip.length = c(0.2, 0.05), label.size = 5,
+  )
+# Avec un line graph et la fonction stat_pvalue_manuel() qui permet de définir automatiquement les marques pour les différences significatives
+pwc.se <- pwc.se %>% add_xy_position(x = "time", fun = "mean_se")
+
+ggline(selfesteem.long, plot_type = "b", add = "mean_se", 
+       x = "time", y = "score", linetype = 2,
+       xlab = FALSE, ylab = "Score d'estime de soi") +
+  stat_pvalue_manual(pwc.se, hide.ns = TRUE, y.position = c(5.5, 8.5, 8.2), tip.length = c(0.2, 0.01))
+```
+
+### Alternatives non-paramétriques pour les analyses à 1 facteur
+
+#### Le test de Kruskal-Wallis pour les VI intergroupe
+
+**Le test de Kruskal-Wallis est l'alternative non-paramétrique pour l'ANOVA à 1 facteur inter-sujet** (VI intergroupe).
+
+Pour réaliser le test de Kruskal-Wallis, on va réutiliser le jeu de données `plant`, qu'on avait utilisé pour l'ANOVA à 1 facteur inter-sujet.
+
+On réalise la même procédure qu'une ANOVA. Il n'y a pas de conditions d'application à vérifier néanmoins. Ci-dessous, je présente uniquement la réalisation du test de Kruskal-Wallis et les test post-hoc.
+
+```{r}
+resKW <- plant %>%
+  kruskal_test(weight ~ group)
+resKW
+
+# Taille d'effet - indicateur eta2
+plant %>% kruskal_effsize(weight ~group)
+
+#Comparaisons deux à deux avec le test de Wilcoxon pour ech. ind.
+pwcKW <- plant %>%
+  wilcox_test(weight ~ group, p.adjust.method = "bonferroni")
+pwcKW
+```
+
+Pour **rapporter l'analyse**, on écrira : $χ^2 (2) = 7.99, p < .05, η^2 = .22$ (au lieu du F de l'Anova), et on précisera que la différence est significative uniquement entre trt1 et trt2 (p adj. \< .05).
+
+#### Le test de Friedman pour les VI intragroupe
+
+**Le test de Friedman est l'alternative non-paramétrique pour l'ANOVA à 1 facteur intra-sujet** (VI intragroupe).
+
+Pour réaliser le test de Friedman, on va réutiliser le jeu de données `selfesteem.long`, qu'on avait utilisé pour l'ANOVA à 1 facteur intra-sujet.
+
+On réalise la même procédure qu'une ANOVA. Il n'y a pas de conditions d'application à vérifier néanmoins. Ci-dessous, je présente uniquement la réalisation du test de Friedman et les test post-hoc.
+
+**Remarque**. La syntaxe pour le test de Friedman est légèrement différente de celle de l'ANOVA à 1 facteur intra-sujet. Pour le test de Friedman, la syntaxe de la formule est `VD ~ VI|id` (avec une barre verticale entre la VI et les identifiants).
+
+```{r}
+resF <- selfesteem.long %>%
+  friedman_test(score ~ time|id)
+resF
+
+# Taille d'effet - indicateur Kendall's W
+selfesteem.long %>% friedman_effsize(score ~ time|id)
+
+#Comparaisons deux à deux avec le test de Wilcoxon pour ech. app. (ajouter l'argument paired = TRUE)
+
+pwcF <- selfesteem.long %>%
+  wilcox_test(score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwcF
+```
+
+**Pour rapporter l'analyse**, on écrira : $χ^2 (2) = 18.2, p < .001, W = .91$ (au lieu du F de l'Anova), et on précisera que les différences entre toutes les modalités sont significatives (p adj. \< .05).
+
+## L'analyse de variance (ANOVA) à 2 facteurs
+
+Lorsqu'on souhaite réaliser une comparaison de moyennes avec deux VI, on va avoir trois cas possibles :
+
+-   ANOVA à 2 facteurs inter-sujets
+
+-   ANOVA à 2 facteurs intra-sujets
+
+-   ANOVA mixtes (une VI intergroupe et une VI intragroupe)
+
+**Remarque.** Le même principe s'applique pour les ANOVA à 3 facteurs : a) ANOVA à 3 facteurs inter-sujets, b) ANOVA à 3 facteurs intra-sujets, et c) ANOVA mixtes (2 facteurs inter-sujets et 1 facteur intra-sujet ou 1 facteur inter-sujet et 2 facteurs intra-sujet). Les conditions d'application sont les mêmes que pour les ANOVA à 2 facteurs, et la procédure est quasi-identique.
+
+Des exemples d'ANOVA à trois facteurs sont disponibles sur le site Datanovia (vous y retrouverez aussi tous les exemples du cours) :
+
+-   ANOVA à trois facteurs inter-sujets : <https://www.datanovia.com/en/fr/lessons/anova-dans-r/#three-way-independent-anova>
+
+-   ANOVA à trois facteurs intra-sujets : <https://www.datanovia.com/en/fr/lessons/anova-sur-mesures-repetees-dans-r/#three-way>
+
+-   ANOVA mixtes à 3 facteurs : <https://www.datanovia.com/en/fr/lessons/anova-mixte-dans-r/#three-way-bbw-b>
+
+### ANOVA à 2 facteurs inter-sujets
+
+**L'ANOVA à 2 facteurs inter-sujets** (*Two-way between-subject ANOVA*) permet de comparer les moyennes issues de plus de deux échantillons non-liés (i.e., composés d'individus différents). Il est utilisé dans le cas où vous avez une expérience avec **deux** **VI intergroupes**.
+
+**Jeu de données utilisé**
+
+Pour l'exemple, on va prendre le jeu de données `jobsatisfaction`, qui contient un score de satisfaction au travail de 58 participants, dont 28 hommes et 30 femmes, et selon trois niveaux d'études (brevet, bac, université).
+
+Ce jeu de données contient quatre variables :
+
+-   `id` : identifiant du participant
+
+-   `gender` : 1ère VI - le genre : Homme ou Femme
+
+-   `education_level` : 2nde VI - le niveau d'études avec 3 niveaux
+
+-   `score` : score de satisfaction au travail.
+
+Les variables `gender` et `education_level` sont toutes deux **des variables intergroupes**, puisque chaque individu n'est concerné que par une modalité de chaque variable. Les individus sont soit des hommes, soit des femmes (variable `gender`) et ont un niveau d'étude (variable `education_level`) soit brevet (`school`), soit bac (`college`), soit universitaire (`university`).
+
+On va donc réaliser une ANOVA à 2 facteurs inter-sujets pour évaluer l'effet du genre et du niveau d'études sur le score satisfaction au travail.
+
+```{r}
+str(jobsatisfaction)
+glimpse(jobsatisfaction)
+```
+
+#### 1. Vérification des conditions d'application
+
+<u> Conditions d'application :</u> Elles sont identiques à celles d'une Anova à 1 facteur inter-sujet
+
+1.  **Indépendance des observations** : Chaque individu appartient à un seul groupe. Il n'y a pas de relations entre les observations de chaque groupe. Cette condition revient à s'assurer que les VI sont bien intergroupes.
+
+2.  **Absence de valeurs aberrantes.** Les données de chaque groupe ne doivent pas contenir de valeurs aberrantes.
+
+3.  **Normalité de la distribution.** Les données de chaque groupe sont distribuées normalement.
+
+4.  **Homogénéité des variances.** Les variances de tous les groupes sont homogènes.
+
+##### Valeurs aberrantes
+
+On va examiner la présence de valeurs aberrantes dans les données de chaque groupe séparément.
+
+```{r}
+#Boite à moustaches
+ggboxplot(jobsatisfaction, x = "gender", y = "score",
+          color = "education_level",
+          add = "jitter", bxp.errorbar = TRUE)
+
+#Algorithme
+jobsatisfaction %>%
+  group_by(gender, education_level) %>%
+  identify_outliers(score)
+
+```
+
+**Interprétation :** Aucune valeur aberrante extrême n'est détectée, on peut poursuivre notre analyse.
+
+##### Normalité des distributions
+
+On examine la normalité de la distribution dans chaque groupe séparément.
+
+```{r, fig.show='hold', fig.asp=1, fig.width=4.5}
+#Diagramme QQ
+ggqqplot(jobsatisfaction, x = "score", ggtheme = theme_bw()) +
+  facet_grid(gender ~ education_level)
+```
+
+```{r}
+#Tests de Shapiro pour chaque combinaison avec rstatix
+jobsatisfaction %>%
+  group_by(gender, education_level) %>%
+  shapiro_test(score)
+```
+
+**Interprétation :** La distribution dans chaque groupe est bien normale (tests de Shapiro, p \> .05), on peut donc continuer avec notre ANOVA.
+
+**Lorsque les données ne sont pas normales,** on fait comme pour le t-test : soit on garde l'ANOVA parce qu'elle peut résister à cette non-normalité, soit on transforme nos données. Attention, il n'y a **pas d'alternative non-paramétrique** pour les ANOVA à 2 facteurs ou plus.
+
+------------------------------------------------------------------------
+
+**Là encore, on peut examiner la normalité de la distribution en analysant les résidus du** **modèle** : On utilise le diagramme QQ et le test de Shapiro, non pas sur chaque groupe séparément, mais sur les résidus du modèle ANOVA.\
+Cette approche peut être pratique lorsque vos échantillons sont petits.
+
+```{r}
+# Création du modèle linéaire
+model <- lm(score ~ gender * education_level, data = jobsatisfaction)
+
+# QQ plot
+ggqqplot(residuals(model))
+
+#Test de Shapiro
+shapiro_test(residuals(model))
+```
+
+##### Homogénéité des variances
+
+Pour vérifier si les variances sont homogènes, on va utiliser le **test de Levene**. Comme pour les tests de normalité, on estimera que les variances sont homogènes lorsque la p-value est supérieure à .05, puisque son hypothèse nulle est que les variances ne sont pas différentes.
+
+```{r}
+# Fonction leveneTest (librairie car)
+leveneTest(score ~ gender * education_level, jobsatisfaction)
+
+# Fonction levene_test (librairie rstatix)
+levene_test(jobsatisfaction, score ~ gender * education_level)
+```
+
+**Interprétation** : La p-value étant supérieure à .05, on peut conclure que les variances sont homogènes.
+
+#### 2. Statistiques descriptives et représentation graphique des données.
+
+**Statistiques descriptives**
+
+```{r}
+  #Librarie rstatix
+    #Au global
+get_summary_stats(jobsatisfaction, type = "common")
+
+    #En fonction des modalités de chaque variable + Interactino
+jobsatisfaction %>%
+  group_by(gender) %>%
+  get_summary_stats(score)
+
+jobsatisfaction %>%
+  group_by(education_level) %>%
+  get_summary_stats(score)
+
+jobsatisfaction %>%
+  group_by(gender, education_level) %>%
+  get_summary_stats(score)
+```
+
+**Représentation graphique**
+
+Quelques exemples de représentation graphique
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+ggline(jobsatisfaction, plot_type = "b", add = "mean_se", 
+       x = "education_level", y = "score", linetype = 2, color = "gender",
+       position = position_dodge(width = 0.1),
+       xlab = FALSE, ylab = "Score de satisfaction au travail")
+
+ggboxplot(jobsatisfaction, x = "gender", y = "score", add = "jitter", color = "education_level",
+          bxp.errorbar = TRUE, xlab = FALSE,
+          ylab = "Score de satisfaction au travail")
+
+ggbarplot(jobsatisfaction, x = "gender", y = "score", add = "mean_se", 
+          palette = "Set1", fill = "education_level", position = position_dodge(width = 0.8), ylab = "Score de satisfaction au travail")
+```
+
+#### 3. Réalisation de l'ANOVA
+
+Nos conditions d'application étant vérifiées, nous pouvons réaliser l'ANOVA à 2 facteurs. Nous souhaitons savoir si le score diffère en fonction du genre ou du niveau d'études, mais aussi s'il y a un effet d'interaction entre les deux variables.
+
+Comme nous avons deux VI, nous allons devoir examiner les effets principaux de ces deux VI, ainsi que leur effet d'interaction. Pour cela, lorsqu'on utilise la syntaxe sous forme de formule, on utilisera l'astérisque `*` pour signifier qu'on souhaite examiner ces trois effets.\
+[Syntaxe :]{.underline} `VD ~ VI1 * VI2`
+
+Version avec la fonction `aov()` :
+
+```{r}
+
+#Fonction aov (librairie stats)
+res.jb <- aov(score ~ gender * education_level, jobsatisfaction)
+summary(res.jb)
+
+
+```
+
+Version avec la fonction `anova_test()` de la librairie `rstatix` :
+
+```{r}
+#Fonction anova_test (librairie rstatix)
+  # Version avec la formule
+res.jb <- anova_test(jobsatisfaction, score ~ gender * education_level, detailed = TRUE, effect.size = "pes")
+get_anova_table(res.jb)
+
+  # Version avec les arguments
+res.jb <- anova_test(jobsatisfaction, dv = score, between = c(gender, education_level), detailed = TRUE, effect.size = "pes")
+get_anova_table(res.jb)
+```
+
+**Interprétation de l'analyse (1) :**
+
+En observant les résultats du test ANOVA, on voit que pour **l'effet principal du niveau d'études, la p-value est inférieure à .05, mais pas pour l'effet principal du genre (p = .448)**. On a donc un effet significatif du niveau d'études uniquement, reste à savoir si toutes les moyennes sont différentes entre elles ou non.
+
+On observe ensuite que **l'effet d'interaction** **Genre x Niveau d'études** est significatif, avec une p-value inférieure à .05 à nouveau. On va donc regarder en détail les moyennes dans chaque sous-groupe pour voir quelle est la nature de cet effet d'interaction.
+
+**La taille d'effet pour l'ANOVA nous est donnée par l'indicateur eta^2^ partiel**, qui s'interprète de la même manière que l'eta^2^ : l'effet principal du niveau d'études explique 88% de la variation, et l'effet d'interaction explique 22% de la variation.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Ils consistent à faire **un ensemble de test-t entre les moyennes de chaque modalité deux à deux**, pour déterminer si elles sont significativement différentes les unes des autres. Comme il y a de multiples tests réalisés, on applique **une correction de la p-value**. Les tests les plus courants avec l'ANOVA sont les tests de Tukey HSD ou les comparaison avec correction de Bonferroni.
+
+-   Pour **l'effet d'interaction**, on va regarder dans chaque modalité d'une VI, les différences entre les modalités de la 2nde VI.
+
+-   Pour **les effets principaux**, on réalise les comparaisons en fonction d'une seule des deux VI.
+
+**Remarque**. On ne réalise les comparaisons deux à deux [uniquement pour les effets significatifs]{.underline}.
+
+```{r}
+# Examen de l'effet d'interaction
+pwc1.jb <- jobsatisfaction %>%
+  group_by(education_level) %>%
+  pairwise_t_test(score ~ gender, p.adjust.method = "bonferroni")
+pwc1.jb
+
+pwc2.jb <- jobsatisfaction %>%
+  group_by(gender) %>%
+  pairwise_t_test(score ~ education_level, p.adjust.method = "bonferroni")
+pwc2.jb
+
+#Examen de l'effet principal
+pwc3.jb <- jobsatisfaction %>%
+  pairwise_t_test(score ~ education_level, p.adjust.method = "bonferroni")
+pwc3.jb
+```
+
+**Remarque.** Dans les tests post-hoc, on examine le détail des effets **statistiquement significatifs seulement**, et on commence par l'effet d'interaction pour redescendre vers les effets principaux.
+
+**Interprétation de l'analyse (2) :**
+
+Les tests post-hoc nous permettent de dire qu'il y bien une différence en termes de satisfaction de travail entre toutes les modalités du niveau d'études : globalement, plus le niveau d'études est élevé, plus la satisfaction est grande (p adj. \< .001).
+
+Pour l'effet d'interaction, on observe qu'il existe une différence significative entre hommes et femmes [uniquement au niveau "université"]{.underline} (p adj. \< .001).
+
+#### 4. Reporter les résultats
+
+Pour reporter les résultats d'une analyse statistique :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Expliquer que l'effet principal du niveau d'études est significatif : $F(1, 52) = 187.892, p < .001, 𝜂^2 = 0.88$, ainsi que l'effet d'interaction : $F(2, 52) = 7.338, p < .001, 𝜂^2 = 0.22$. Cependant, l'effet principal du genre n'est pas significatif : $F(1, 52) = 0.586, p > .400, 𝜂^2 = 0.01$.
+
+    -   On a une différence significative au global entre les trois niveaux d'études (p. adj. \< .001) et la différence Homme-Femme n'est significative qu'au niveau université (p. adj. \< .001).
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, écart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée .
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+# Boxplot + geom_bracket() pour définir manuellement les marques des différences significatives
+ggboxplot(jobsatisfaction, x = "education_level", y = "score",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "gender",
+          ylab = "score de satisfaction au travail", legend = "none",
+          ylim = c(5,12)) +
+  geom_bracket(
+    xmin = c("school", "college", "school"), xmax = c("college", "university", "university"), y.position = c(8, 10.5, 11.5),
+    label = "*", tip.length = c(0.1, 0.02), label.size = 6,
+  )
+
+pwc1.jb <- pwc1.jb %>%
+  add_xy_position(x = "education_level", dodge = 0.8, fun = "mean_sd")
+pwc3.jb <- pwc3.jb %>%
+  add_xy_position(x = "education_level", fun = "mean_sd")
+
+ggbarplot(jobsatisfaction, x = "education_level", y = "score", add = "mean_se", 
+          palette = "Set1", fill = "gender", position = position_dodge(width = 0.8), ylab = "Score de satisfaction au travail", ylim = c(0, 13)) + 
+  stat_pvalue_manual(pwc1.jb, hide.ns = TRUE, tip.length = 0.01) + 
+  stat_pvalue_manual(pwc3.jb, hide.ns = TRUE, tip.length = 0.01, step.increase = 0.05)
+
+```
+
+### ANOVA à 2 facteurs intra-sujets (mesures répétées)
+
+**L'ANOVA à 2 facteurs intra-sujets** (*Two-way within-subject ANOVA*) permet de comparer les moyennes issues de plus de deux échantillons appariés (i.e., composés des mêmes individus). Il est utilisé dans le cas où vous avez une expérience avec deux **VI intragroupes**.
+
+**Jeu de données utilisé**
+
+On va prendre le jeu de données `selfesteem2`, qui contient le score à un questionnaire d'estime de soi de 10 individus au cours du temps (trois temps de mesure : T1, T2, T3), qui ont suivi deux phases de test : une 1ère phase "contrôle" sans traitement (avec trois temps de mesure) et une 2nde phase "diet" où ils ont suivi un régime (avec trois temps de mesure).
+
+Autrement dit, on mesure le score d'estime de soi des individus aux trois temps de mesure et ces trois temps de mesure sont répétés pendant les deux phases (soit 2 x 3 mesures répétées).
+
+```{r}
+head(selfesteem2)
+```
+
+Ce jeu de données contient quatre variables :
+
+-   `id` : numéro d'identification de l'individu
+
+-   `treatment` : pendant une période "contrôle" (`ctr`), et une période de régime (`diet`)
+
+-   `t1`, `t2`, `t3` : score au 1er, au 2eme et au 3eme temps de mesure
+
+Les variables `time` (que nous allons créer juste après) et `treatment` sont toutes deux **des variables intragroupes**, puisque tous les individus passent toutes les modalités de temps (t1, t2, t3), et les deux modalités de la variable `treatment` (d'abord une phase contrôle, puis une phase de régime)
+
+On va donc réaliser une ANOVA à 2 facteurs intra-sujets pour évaluer l'effet du traitement et du temps sur le score d'estime de soi.
+
+```{r}
+str(selfesteem2)
+glimpse(selfesteem2)
+```
+
+**Préparation du jeu de données**
+
+Comme pour le t-test pour échantillons appariés, la réalisation de l'analyse implique de créer un fichier avec une variable de regroupement et une seule colonne contenant la VD. On utilise à nouveau la fonction `gather()`.
+
+La colonne `id` est essentielle pour une analyse à mesures répétées, afin que le test puisse tenir compte de la variation intra-sujet (au sein d'un même individu). Cette colonne doit être transformée en facteur.
+
+```{r}
+selfesteem2 <- transform(selfesteem2, id = as.factor(id))
+
+selfesteem2.long <- selfesteem2 %>%
+  gather(key = "time", value = "score", t1, t2, t3, factor_key = TRUE)
+
+str(selfesteem2.long)
+```
+
+#### 1. Vérification des conditions d'application
+
+[Conditions d'application :]{.underline} Elles sont identiques à celles d'une ANOVA à 2 facteurs intra-sujets
+
+1.  **Appariement des observations** : Chaque individu a une mesure pour chaque modalité des VI ; il y a autant de mesures par individu que de modalités dans la variable. Cette condition revient à s'assurer que les VI sont bien intragroupes.
+
+2.  **Absence de valeurs aberrantes.** Les données de chaque groupe ne doivent pas contenir de valeurs aberrantes.
+
+3.  **Normalité de la distribution.** Les données de chaque groupe sont distribuées normalement.
+
+4.  **Sphéricité des variances.** L'hypothèse de sphéricité signifie que les variances des différences entre les conditions sont homogènes.
+
+##### Valeurs aberrantes
+
+On examine la présence de ces valeurs dans les données de chaque groupe séparément.
+
+```{r}
+#Boite à moustaches
+ggboxplot(selfesteem2.long, x = "time", y = "score", color = "treatment",
+          add = "jitter", bxp.errorbar = TRUE)
+
+#Algorithme
+selfesteem2.long %>%
+  group_by(time, treatment) %>%
+  identify_outliers(score)
+
+```
+
+**Interprétation :** Aucune valeur aberrante extrême n'est détectée, on peut poursuivre l'analyse.
+
+##### Normalité des distributions
+
+On examine la normalité de la distribution dans chaque groupe séparément.
+
+```{r, fig.show='hold', fig.asp=1, fig.width=4.5}
+#Diagramme QQ
+ggqqplot(selfesteem2.long, x = "score", ggtheme = theme_bw()) +
+  facet_grid(treatment ~ time)
+```
+
+```{r}
+#test de Shapiro par combinaison de modalités
+selfesteem2.long %>%
+  group_by(time, treatment) %>%
+  shapiro_test(score)
+```
+
+**Interprétation :** La distribution dans chaque groupe est bien normale (tests de Shapiro, p \> .05, sauf pour Contrôle à T1, mais sur les diagrammes QQ, l'écart n'est pas énorme), on peut donc continuer avec notre ANOVA.
+
+**Lorsque les données ne sont pas normales,** on fait comme pour le t-test : soit on garde l'ANOVA parce qu'elle peut résister à cette non-normalité, soit on transforme nos données. Attention, il n'y a **pas d'alternative non-paramétrique** pour les ANOVA à 2 facteurs ou plus.
+
+##### Sphéricité
+
+Pour vérifier l'hypothèse de sphéricité, on va utiliser le **test de sphéricité de Mauchly**. Ce test consiste à évaluer si la variance des différences entre toutes les conditions sont homogènes.
+
+En utilisant la fonction `anova_test()` de rstatix, le test de sphéricité est compris dans la procédure. On verra dans la section de réalisation de l'analyse comment obtenir le résultat du test de Mauchly.
+
+**Que faire si la sphéricité n'est pas respectée ?\
+**Là encore, pas de panique, on peut quand même utiliser l'ANOVA, en appliquant des corrections. La plus courante est **la correction de Greenhouse-Geisser (GG)**, qu'on appliquera aux facteurs concernés par la violation de la sphéricité.
+
+En utilisant les fonctions proposées par `rstatix`, cette correction sera appliquée en ajoutant l'argument `correction = "auto"` dans la fonction `get_anova_table()`.
+
+#### 2. Statistiques descriptives et représentation graphique des données.
+
+**Statistiques descriptives**
+
+```{r}
+# Fonction de base pour obtenir des indicateurs statistiques
+summary(selfesteem2.long)
+summary(selfesteem2)
+
+# Fonctions renvoyant des données plus complètes
+  #Librarie rstatix
+    #Au global
+get_summary_stats(selfesteem2.long, type = "common")
+
+    #En fonction des modlités de la variable "supp"
+selfesteem2.long %>%
+  group_by(time, treatment) %>%
+  get_summary_stats(score)
+
+```
+
+On observe d'ores et déjà que le score moyen pour le groupe Contrôle est de 88 (SD = 8.08) à T1, de 83.8 (SD = 10.2) à T2 et de 78.7 (SD = 10.5) à T3. Pour le groupe Diet, le score moyen est de 87.6 (SD = 7.62) à T1, de 87.8 (SD = 7.42) à T2 et de 87.7 (SD = 8.14) à T3.
+
+**Représentation graphique**
+
+Quelques exemples de représentation graphique
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+ggline(selfesteem2.long, plot_type = "b", add = "mean_se", 
+       x = "time", y = "score", linetype = 2, color = "treatment",
+       position = position_dodge(width = 0.05),
+       xlab = FALSE, ylab = "Score d'estime de soi")
+
+ggboxplot(selfesteem2.long, x = "time", y = "score", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "treatment",
+          ylab = "Score d'estime de soi", legend = "none")
+
+ggbarplot(selfesteem2.long, x = "treatment", y = "score", add = "mean_se", 
+          palette = "Set1", fill = "time", position = position_dodge(width = 0.8), ylab = "Score d'estime de soi",
+          legend = "none")
+```
+
+#### 3. Réalisation de l'ANOVA
+
+Nos conditions d'application étant vérifiées, nous pouvons réaliser l'ANOVA à 2 facteurs intra-sujets. Nous souhaitons savoir si le score d'estime de soi est différent entre T1, T2 et T3, et en fonction du traitement (contrôle vs. régime).
+
+Comme pour l'analyse précédente, on va s'intéresser aux effets principaux des deux VI, ainsi qu'à l'effet d'interaction.
+
+Version avec la fonction `aov()` - Non recommandée
+
+```{r}
+#Fonction aov (librairie stats)
+res.se2 <- aov(score ~ time * treatment + Error(id/(time*treatment)), selfesteem2.long)
+summary(res.se2)
+```
+
+Version avec la fonction `anova_test()` de la librairie `rstatix` :
+
+```{r}
+#Fonction anova_test (librairie rstatix)
+  # Version avec la formule
+res.se2 <- anova_test(selfesteem2.long, score ~ time * treatment + Error(id/(time * treatment)), detailed = TRUE)
+res.se2
+get_anova_table(res.se2, correction = "auto")
+
+  # Version avec les arguments
+res.se2 <- anova_test(selfesteem2.long, dv = score, wid = id, within = c(treatment, time), detailed = TRUE)
+res.se2
+get_anova_table(res.se2, correction = "auto")
+```
+
+**Remarque**. Je vous conseille d'utiliser plutôt la fonction `anova_test()`, qui est beaucoup plus facile à utiliser, grâce à la possibilité d'indiquer vos différentes variables par des arguments.
+
+**Interprétation de l'analyse (1) :**
+
+En observant les résultats du test ANOVA, on voit que pour **les effets principaux du temps et du traitement, la p-value est inférieure à .05**. On a donc un effet global significatif des deux VI, reste à savoir si toutes les moyennes sont différentes entre elles ou non. **L'effet d'interaction Time x Treatment** est aussi significatif (p \< .05).
+
+On voit aussi que le facteur Temps ne respectait pas l'hypothèse de sphéricité, et a donc été corrigé automatiquement dans le rendu de la fonction `get_anova_table()`. La correction de Greenhouse-Geisser consiste à corriger la valeur des degrés de liberté de ce facteur.
+
+**La taille d'effet pour l'ANOVA nous est donnée par l'indicateur eta^2^**, qui s'interprète très simplement : $eta^2 = 0.06$ signifie que 6% de la variation du score est attribuable au facteur.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Ils consistent à faire **un ensemble de test-t entre les moyennes de chaque modalité deux à deux**, pour déterminer si elles sont significativement différentes les unes des autres. Comme il y a de multiples tests réalisés, on applique **une correction de la p-value**.
+
+Ici, il faudra faire attention à préciser l'argument `paired = TRUE` pour que les t-tests soit des test appariés (mesures répétées).
+
+```{r}
+# Exploration de l'effet d'interaction
+pwc1.se2 <- selfesteem2.long %>%
+  group_by(treatment) %>%
+  pairwise_t_test(score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwc1.se2
+
+pwc2.se2 <- selfesteem2.long %>%
+  group_by(time) %>%
+  pairwise_t_test(score ~ treatment, paired = TRUE, p.adjust.method = "bonferroni")
+pwc2.se2
+
+# Exploration de l'effet simple du temps
+pwc3.se2 <- selfesteem2.long %>%
+  pairwise_t_test(score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwc3.se2
+
+
+```
+
+**Interprétation de l'analyse (2) :**
+
+Les tests post-hoc nous permettent de dire que **les différences entre T1, T2 et T3 sont significatives (effet principal du temps)**.
+
+Cependant, lorsqu'on explore **l'effet d'interaction significatif**, on s'aperçoit que la différence entre T1, T2 et T3 n'est significative que pour la modalité "Contrôle", avec une diminution du score au cours du temps. Aussi, on voit que les deux conditions de traitement sont différentes l'une de l'autre qu'à T2 et T3.
+
+#### 4. Reporter les résultats
+
+Pour reporter les résultats d'une analyse statistique :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Donner les effets significatifs : Pour le traitement :$F(1, 11) = 15.541, p < 0.01, 𝜂^2 = 0.06$; pour le Temps : $F(1.31, 14.37) = 27.369, p < .001; 𝜂^2 = 0.05$; pour l'interaction Temps x Traitement : $F(2, 22) = 30.424, p < .001; 𝜂^2 = 0.05$.
+
+    -   Ici, ce qui va nous intéresser le plus, c'est de dire que les différences entre T1, T2 et T3 sont significatives, seulement pour le groupe Contrôle (p. adj. \< .01), et que la différence Contrôle vs Diet est significative à T2 et T3. Cela signifie que la condition "Diet" permet de maintenir le score d'estime soi, alors qu'en contrôle, il diminue avec le temps.
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, ecart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée (ici, ce n'est pas le cas, mais on le verra plus tard).
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+
+pwc2.se2 <- pwc2.se2 %>% add_xy_position(x = "time", fun = "mean_se")
+pwc1.se2 <- pwc1.se2 %>% add_xy_position(x = "time", fun = "mean_se")
+
+ggline(selfesteem2.long, plot_type = "b", add = "mean_se", 
+       x = "time", y = "score", linetype = 2, color = "treatment",
+       position = position_dodge(width = 0.05),
+       xlab = FALSE, ylab = "Score d'estime de soi") +
+  stat_pvalue_manual(pwc2.se2, tip.length = 0, hide.ns = TRUE, linetype  = "blank") +
+  stat_pvalue_manual(pwc1.se2, color = "treatment", step.group.by = "treatment",
+    tip.length = 0.01, step.increase = -0.01, hide.ns = TRUE, bracket.nudge.y = 1) 
+```
+
+### ANOVA mixte à 2 facteurs
+
+**L'ANOVA mixte à 2 facteurs** (*Two-way mixed ANOVA*) permet de comparer les moyennes avec une VI intergroupe et une VI intra-groupe. On a donc des participants répartis dans plusieurs groupes indépendants (VI intergroupe), mais dans lesquels plusieurs mesures sont répétées (VI intragroupe).
+
+**Jeu de données utilisé**
+
+```{r}
+head(anxiety)
+
+str(anxiety)
+```
+
+Pour cet exemple, on va utiliser le jeu de données `anxiety`, qui contient les données de 45 sujets, répartis en 3 groupes et pour lesquels on a mesuré le score d'anxiété à trois moments différents. Les groupes correspondent au niveau d'exercice physique auquel les individus ont participé. Ce jeu de données contient 5 colonnes :
+
+-   `id` : identifiant du participant
+
+-   `group` : groupe d'exercice physique- `grp1` : niveau débutant, `grp2` : niveau intermédiaire, `grp3` : niveau avancé
+
+-   `t1`, `t2`, `t3` : score d'anxiété mesuré respectivement à T1, à T2 et à T3
+
+La variable `group` est une **variable intergroupe** (chaque participant n'appartient qu'à un seul groupe) et on va créer la variable `time` (qui contiendra les modalités t1, t2 et t3), qui sera une variable **intra-groupe** (tous les participants passent toutes les modalités - On mesure le score d'anxiété de tous les participants aux trois temps de mesure).
+
+On va donc réaliser une ANOVA mixte à 2 facteurs pour évaluer l'effet du niveau d'exercice physique et du temps sur le score d'anxiété.
+
+**Préparation du jeu de données**
+
+Comme pour les autres analyses ayant des mesures répétées, la réalisation de l'analyse implique de créer un fichier avec une variable de regroupement et une seule colonne contenant la VD. On utilise à nouveau la fonction `gather()`.
+
+La colonne `id` est essentielle pour une analyse à mesures répétées, afin que le test puisse tenir compte de la variation intra-sujet (au sein d'un même individu). Cette colonne doit être transformée en facteur.
+
+```{r}
+anxiety <- transform(anxiety, id = as.factor(id))
+
+anxiety.long <- anxiety %>%
+  gather(key = "time", value = "score", t1, t2, t3, factor_key = TRUE)
+
+str(anxiety.long)
+```
+
+#### 1. Vérification des conditions d'application
+
+[Conditions d'application :]{.underline} Elles combinent celles de l'ANOVA avec un facteur inter-sujet et de l'ANOVA avec un facteur intra-sujet.
+
+1.  **Absence de valeurs aberrantes.** Les données de chaque groupe ne doivent pas contenir de valeurs aberrantes.
+
+2.  **Normalité de la distribution.** Les données de chaque groupe sont distribuées normalement.
+
+3.  **Homogénéité des variances du facteur inter-sujet**. Les variances du facteur inter-sujet doivent être homogènes dans chaque modalité du facteur intra-sujet
+
+4.  **Sphéricité des variances du facteur intra-sujet.** L'hypothèse de sphéricité signifie que les variances des différences entre les conditions sont homogènes dans chaque modalité du facteur inter-sujet.
+
+##### Valeurs aberrantes
+
+On examine la présence de ces valeurs dans les données de chaque groupe séparément.
+
+```{r}
+#Boite à moustaches
+ggboxplot(anxiety.long, x = "time", y = "score", color = "group",
+          add = "jitter", bxp.errorbar = TRUE)
+
+#Algorithme
+anxiety.long %>%
+  group_by(time, group) %>%
+  identify_outliers(score)
+
+```
+
+**Interprétation :** Aucune valeur aberrante extrême n'est détectée, on peut poursuivre l'analyse.
+
+##### Normalité des distributions
+
+On examine la normalité de la distribution dans chaque groupe séparément.
+
+```{r, fig.show='hold', fig.asp=1, fig.width=4.5}
+#Diagramme QQ
+ggqqplot(anxiety.long, x = "score", ggtheme = theme_bw()) +
+  facet_grid(group ~ time)
+
+#Autre possibilité
+ggqqplot(anxiety.long, x = "score", facet.by = c("group", "time"))
+```
+
+```{r}
+#test de Shapiro par combinaison de modalités
+anxiety.long %>%
+  group_by(time, group) %>%
+  shapiro_test(score)
+```
+
+**Interprétation :** La distribution dans chaque groupe est bien normale (tests de Shapiro, p \> .05), on peut donc continuer avec notre ANOVA.
+
+**Lorsque les données ne sont pas normales,** on fait comme pour le t-test : soit on garde l'ANOVA parce qu'elle peut résister à cette non-normalité, soit on transforme nos données. Attention, il n'y a **pas d'alternative non-paramétrique** pour les ANOVA à 2 facteurs ou plus.
+
+##### Homogénéité des variances
+
+Pour vérifier si les variances sont homogènes, on va utiliser le **test de Levene**. Comme pour les tests de normalité, on estimera que les variances sont homogènes lorsque la p-value est supérieure à .05, puisque son hypothèse nulle est que les variances ne sont pas différentes.
+
+L'homogénéité des variances doit être vérifiée dans chaque modalité de la variable intragroupe (`time`)
+
+```{r}
+# Fonction levene_test (librairie rstatix)
+anxiety.long %>%
+  group_by(time) %>%
+  levene_test(score ~ group)
+```
+
+**Interprétation** : Les p-value étant supérieures à .05, on peut conclure que les variances sont homogènes.
+
+##### Sphéricité
+
+Pour vérifier l'hypothèse de sphéricité, on va utiliser le **test de sphéricité de Mauchly**. Ce test consiste à évaluer si la variance des différences entre toutes les conditions sont homogènes.
+
+En utilisant la fonction `anova_test()` de rstatix, le test de sphéricité est compris dans la procédure. On verra dans la section de réalisation de l'analyse comment obtenir le résultat du test de Mauchly.
+
+**Que faire si la sphéricité n'est pas respectée ?\
+**Là encore, pas de panique, on peut quand même utiliser l'ANOVA, en appliquant des corrections. La plus courante est la correction de Greenhouse-Geisser (GG), qu'on appliquera aux facteurs concernés par la violation de la sphéricité.
+
+En utilisant les fonctions proposées par `rstatix`, cette correction sera appliquée en ajoutant l'argument `correction = "auto"` dans la fonction `get_anova_table()`.
+
+#### 2. Statistiques descriptives et représentation graphique des données.
+
+**Statistiques descriptives**
+
+```{r}
+# Fonction de base pour obtenir des indicateurs statistiques
+summary(anxiety.long)
+summary(anxiety)
+
+# Fonctions renvoyant des données plus complètes
+  #Librarie rstatix
+    #Au global
+get_summary_stats(anxiety.long, type = "common")
+
+    #En fonction des modlités de la variable "supp"
+anxiety.long %>%
+  group_by(time, group) %>%
+  get_summary_stats(score)
+
+```
+
+**Représentation graphique**
+
+Quelques exemples de représentation graphique
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 3}
+ggline(anxiety.long, plot_type = "b", add = "mean_se", 
+       x = "time", y = "score", linetype = 2, color = "group",
+       position = position_dodge(width = 0.05),
+       xlab = FALSE, ylab = "Score d'estime de soi")
+
+ggboxplot(anxiety.long, x = "time", y = "score", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group",
+          ylab = "Score d'estime de soi")
+
+ggbarplot(anxiety.long, x = "group", y = "score", add = "mean_se", 
+          palette = "Set1", fill = "time", position = position_dodge(width = 0.8), ylab = "Score d'estime de soi")
+```
+
+#### 3. Réalisation de l'ANOVA
+
+Nos conditions d'application étant vérifiées, nous pouvons réaliser l'ANOVA mixte à 2 facteurs. Nous souhaitons savoir si le score d'anxiété est différent entre T1, T2 et T3, et en fonction du groupe d'exercice physique.
+
+Comme pour l'analyse précédente, on va s'intéresser aux effets principaux des deux VI, ainsi qu'à l'effet d'interaction.
+
+Version avec la fonction `aov()` - Non recommandée
+
+```{r}
+#Fonction aov (librairie stats)
+res.anx <- aov(score ~ group * time + Error(id/time), anxiety.long)
+summary(res.anx)
+```
+
+Version avec la fonction `anova_test()` de la librairie `rstatix` :
+
+```{r}
+#Fonction anova_test (librairie rstatix)
+  # Version avec la formule
+res.anx <- anova_test(anxiety.long, score ~ group * time + Error(id/time), 
+                    effect.size = "pes",detailed = TRUE)
+res.anx
+get_anova_table(res.anx, correction = "auto")
+
+  # Version avec les arguments
+res.anx <- anova_test(anxiety.long, dv = score, wid = id, within = time, between = group, 
+                    effect.size = "pes", detailed = TRUE)
+res.anx
+get_anova_table(res.anx, correction = "auto")
+```
+
+**Remarque**. Je vous conseille d'utiliser plutôt la fonction `anova_test()`, qui est beaucoup plus facile à utiliser, grâce à la possibilité d'indiquer vos différentes variables par des arguments.
+
+**Interprétation de l'analyse (1) :**
+
+En observant les résultats du test ANOVA, on voit que pour **les effets principaux du temps et du groupe, la p-value est inférieure à .05**. On a donc un effet global significatif des deux VI, reste à savoir si toutes les moyennes sont différentes entre elles ou non. **L'effet d'interaction Time x Group** est aussi significatif (p \< .05)
+
+**La taille d'effet pour l'ANOVA nous est donnée par l'indicateur eta^2^ partiel**, qui s'interprète très simplement : $eta^2 = 0.17$ signifie que 17% de la variation du score est attribuable aux conditions de traitement.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Ils consistent à faire **un ensemble de test-t entre les moyennes de chaque modalité deux à deux**, pour déterminer si elles sont significativement différentes les unes des autres. Comme il y a de multiples tests réalisés, on applique **une correction de la p-value** (ici, on utilise des "*pairwise t-tests*" avec correction de Bonferroni).
+
+```{r}
+# Exploration de l'effet d'interaction
+pwc1.anx <- anxiety.long %>%
+  group_by(group) %>%
+  pairwise_t_test(score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwc1.anx
+
+pwc2.anx <- anxiety.long %>%
+  group_by(time) %>%
+  pairwise_t_test(score ~ group, p.adjust.method = "bonferroni")
+pwc2.anx
+
+# Exploration de l'effet simple du temps
+pwc3.anx <- anxiety.long %>%
+  pairwise_t_test(score ~ time, paired = TRUE, p.adjust.method = "bonferroni")
+pwc3.anx
+
+# Exploration de l'effet simple du groupe
+pwc4.anx <- anxiety.long %>%
+  pairwise_t_test(score ~ group, p.adjust.method = "bonferroni")
+pwc4.anx
+
+
+```
+
+**Interprétation de l'analyse (2) :**
+
+**Sur les effets principaux,** on voit que globalement, le score d'anxiété est différent entre toutes les modalités de la variable Temps (T1 \> T2 \> T3). On voit aussi que pour l'effet principal du groupe, le score d'anxiété est différent entre le groupe 1 et le groupe 3, ainsi qu'entre le groupe 2 et le groupe 3. Par contre, il n'y a pas de différence significative entre groupe 1 et groupe 2.
+
+**En ce qui concerne l'effet d'interaction**, on observe que :
+
+-   La différence entre T1 et T2 n'est pas significative pour les groupes 1 et 2, mais elle est significative pour le groupe 3. Cela signifie que le score d'anxiété diminue plus tôt dans le groupe 3 par rapport aux autres
+
+-   À T1, les scores de chaque groupe ne sont pas différents entre eux. À T2, le groupe 3 a un score significativement différent du groupe 1 seulement, et à T3, le groupe 3 a un score significativement différent des deux autres groupes.
+
+Ces élément réunis nous permettent de dire que de l'exercice physique intense (niveau avancé) permet de réduire plus vite et plus efficacement le score d'anxiété, par rapport à de l'exercice physique moins intense (niveaux intermédiaire et avancé)
+
+#### 4. Reporter les résultats
+
+Pour reporter les résultats d'une analyse statistique :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Donner les effets significatifs :\
+        Pour le groupe :$F(2, 42) = 4.352, p < 0.05, 𝜂^2 = 0.17$;\
+        Pour le Temps : $F(2, 84) = 394.909, p < .05; 𝜂^2 = 0.90$;\
+        Pour l'interaction Temps x Groupe : $F(4, 84) = 110.188, p < .05; 𝜂^2 = 0.84$
+
+    -   On décrit les différences observées dans les tests post-hoc, en précisant la p-value ajustée associée aux différences notables.
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, écart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée (ici, ce n'est pas le cas, mais on le verra plus tard).
+
+```{r}
+pwc2.anx <- pwc2.anx %>% add_xy_position(x = "time")
+
+ggboxplot(anxiety.long, x = "time", y = "score", 
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group",
+          ylab = "Score d'estime de soi") + 
+  stat_pvalue_manual(pwc2.anx, tip.length = 0.02, hide.ns = TRUE)
+```
+
+# Comparaison de moyennes avec ajout d'une covariable
+
+Les **covariables** sont des variables parasites que vous avez mesuré afin de pouvoir tenir compte de leur influence sur le modèle que vous souhaitez tester. Autrement dit, lorsque vous réalisez votre comparaison de moyennes pour évaluer l'impact d'une ou plusieurs VI sur la VD, vous souhaitez "retirer" l'influence de cette covariable sur les résultats.
+
+**L'ANCOVA** est un type d'ANOVA qui permet de "supprimer" l'influence d'une covariable avant de réaliser l'ANOVA avec les facteurs d'intérêt.
+
+Par exemple, si vous faites une expérience dans laquelle vous mesurez l'impact d'un serious game sur l'apprentissage des mathématiques, il peut être pertinent de contrôler le niveau initial de mathématiques des enfants, afin d'examiner uniquement l'impact du serious game (quel que soit le niveau de mathématiques initial des enfants).
+
+Cette procédure est souvent utilisée lorsqu'on réalise des expériences avec un protocole pré-post (c'est-à-dire qu'on mesure la VD avant et après une intervention). Dans ce cas, il est d'usage de mettre en covariable le score au pré-test, et d'évaluer l'impact de l'intervention sur le score post-test (entre un groupe contrôle et un groupe équipé).
+
+## Conditions d'application d'une ANCOVA
+
+L'ANCOVA a plusieurs conditions d'application supplémentaires par rapport à une ANOVA classique :
+
+1.  **Absence de valeurs aberrantes.**
+2.  **Normalité des distributions.**
+3.  **Homoscédasticité.** Cela correspond à l'homogénéité des variances des résidus du modèle.
+4.  **Linéarité entre la VD et la covariable.**
+5.  **Homogénéité des pentes de régression.** Les pentes des droites de régression, formées par la covariable et la VD, devraient être les mêmes pour chaque groupe. Cette hypothèse évalue qu'il n'y a pas d'interaction entre le résultat et la covariable.
+
+## ANCOVA à 1 facteur
+
+**Jeu de données utilisé**
+
+On va réutiliser le jeu de données `anxiety` pour illustrer cette analyse, en conservant que les scores T1 et T3. La situation expérimentale aurait pour objectif d'évaluer un programme d'exercice physique sur le score d'anxiété, mesuré avant et après que les individus aient participé au programme.
+
+Dans ce cas, on peut se demander si le score initial d'anxiété des individus pourrait avoir impacté l'efficacité des programmes d'exercice physique sur l'évolution de l'anxiété. On va donc contrôler l'impact du niveau initial d'anxiété, avant d'examiner l'effet du programme sur le score d'anxiété final.
+
+On utilisera donc le score pré-test comme covariable et examinerons les différence sur le score post-test (VD) en fonction du groupe (VI).
+
+```{r}
+# Retrait de la colonne T2 + Renommer les colonnes T1 et T3
+anxiety2 <- anxiety %>%
+  select(id, group, t1, t3) %>%
+  rename(pretest = t1, posttest = t3)
+
+# On modifie la valeur du participant 14 pour que l'exemple soit parlant sur les conditions d'application
+anxiety2[14, "posttest"] <- 19
+```
+
+### 1. Vérification des conditions d'application
+
+#### Valeurs aberrantes
+
+Comme pour les ANOVA, on vérifie la présence de valeurs aberrantes dans chaque sous-groupe.
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+anxiety2 %>%
+  group_by(group) %>%
+  identify_outliers(posttest)
+
+anxiety2 %>%
+  group_by(group) %>%
+  identify_outliers(pretest)
+
+
+ggboxplot(anxiety2, x = "group", y = "posttest", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group")
+
+ggboxplot(anxiety2, x = "group", y = "pretest", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "group")
+
+```
+
+**Interprétation** : Il n'y a aucune valeur aberrante dans le jeu de données, que ce soit sur la VD ou la covariable.
+
+#### Normalité des distributions
+
+Comme pour les ANOVA, on vérifie la normalité dans chaque sous-groupe.
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+ggqqplot(anxiety2, x = "posttest", facet.by = "group")
+ggqqplot(anxiety2, x = "pretest", facet.by = "group")
+
+anxiety2 %>%
+  group_by(group) %>%
+  shapiro_test(pretest, posttest)
+
+```
+
+**Interprétation** : La VD et la covariable sont normalement distribuées (Shapiro, p \< .05).
+
+------------------------------------------------------------------------
+
+Comme il s'agit d'une ANOVA avec 1 facteur inter-sujet, on peut aussi vérifier la normalité de la distribution de la VD en utilisant les résidus du modèle (incluant la covariable). Cette technique est d'autant mieux car la normalité sera vérifiée en tenant compte de la covariable.
+
+```{r}
+# Construction du modèle - La covariable vient toujours en premier, et on ajoute la VI avec le signe + (et non le signe *)
+
+model <- lm(posttest ~ pretest + group, data = anxiety2)
+
+ggqqplot(residuals(model))
+
+shapiro_test(residuals(model))
+```
+
+#### Homoscédasticité
+
+Contrairement aux ANOVA classiques dans lesquelles on vérifie l'homogénéité des variances sur la VD, l'hypothèse d'homoscédasticité suppose que les variances des résidus dans chaque groupe sont homogènes.
+
+Comme on doit vérifier l'homoscédasticité en fonction du groupe, on va d'abord ajouter les résidus à notre jeu de données, puis réaliser le test de Levene.
+
+```{r}
+# Ajout d'une colonne contenant les résidus du modèle
+anxiety2 <- cbind(anxiety2, resid = residuals(model))
+
+anxiety2 %>% 
+  levene_test(resid ~ group)
+```
+
+**Interprétation :** Le test de Levene renvoie une p-value supérieure à .05, donc l'homoscédasticité est respectée.
+
+#### Linéarité de la covariable et de la VD
+
+Nous devons vérifier que pour chaque condition de la VI, la VD et la covariable ont une relation linéaire entre elles.
+
+```{r}
+# Méthode 1 : Calcul des coefficients de corrélation entre la VD et la covariable dans chaque groupe
+anxiety2 %>%
+  group_by(group) %>%
+  cor_test(posttest, pretest)
+
+```
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+# Méthode 2 : Faire un graphique en nuage de points (scatterplot), et tracer les droites de régression
+ggscatter(anxiety2, x = "pretest", y = "posttest",
+  color = "group", add = "reg.line")
+
+# On peut ajouter à ce graphe l'équation des droites et le R2 (qui quantifie la force de la relation)
+ggscatter(anxiety2, x = "pretest", y = "posttest",
+  color = "group", add = "reg.line")+
+  stat_regline_equation(
+    aes(label =  paste(..rr.label..), color = group)
+    )
+```
+
+#### Homogénéité des pentes de régression
+
+Cette condition revient à vérifier qu'il n'y a pas d'interaction entre la covariable et la VI. Autrement dit, on doit avoir une relation similaire entre la VD et la covariable, à tous les niveaux de la VI.
+
+Cela revient à examiner s'il existe un effet d'interaction entre la covariable et la VI.
+
+```{r}
+# Homogénéité des pentes : ANOVA(VD ~ VI * COV)
+anova_test(anxiety2, posttest ~ group * pretest)
+```
+
+**Interprétation** : Comme il n'y a pas d'effet d'interaction entre le VI et la covariable, on peut confirmer que les pentes de régression sont homogènes. La condition est donc vérifiée.
+
+**Remarque.** On peut examiner cette condition sur le graphe précédent (voir ci-dessous). En effet, le fait que les trois droites soient parallèles montre qu'il n'y a pas d'effet d'interaction entre la covariable et la VI.
+
+```{r}
+ggscatter(anxiety2, x = "pretest", y = "posttest",
+  color = "group", add = "reg.line")
+```
+
+### 2. Réalisation de l'ANCOVA
+
+On va utiliser la fonction `anova_test()` qui est plus facile à utiliser pour réaliser une ANCOVA.
+
+**Si vous utilisez la version avec la formule,** il faudra être bien vigilant à mettre la covariable en 1er dans la liste des VI et la séparer d'un signe `+` et non d'un signe `*`.\
+[Syntaxe :]{.underline} `VD ~ COV + VI`
+
+```{r}
+
+# Version avec la formule
+res.anx2 <- anova_test(anxiety2, posttest ~ pretest + group)
+res.anx2
+
+# Version avec les argument
+res.anx2 <- anova_test(anxiety2, dv = posttest, covariate = pretest, between = group)
+res.anx2
+```
+
+**Interprétation** : Après avoir contrôlé l'impact de la covariable sur le score pré-test, on peut conclure qu'il y a un effet significatif du groupe sur le score.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Pour les tests post-hoc, on va utiliser la fonction `emmeans_test()` qui permet de réaliser les comparaisons deux à deux sur des **moyennes marginales corrigées** (c'est-à-dire des moyennes ajustées en tenant compte de l'impact de la covariable).
+
+```{r}
+# Comparaisons 2 à 2 avec covariable
+pwc.anx2 <- anxiety2 %>% 
+  emmeans_test(
+    posttest ~ group, covariate = pretest)
+pwc.anx2
+```
+
+**Interprétation** : Les comparaisons deux à deux nous permettent de conclure, qu'après contrôle de la covariable, les différences sont significatives entre toutes les modalités de la variable groupe.
+
+Pour obtenir la valeur des moyennes corrigées, on peut utiliser la fonction `get_emmeans()`.
+
+```{r}
+get_emmeans(pwc.anx2)
+```
+
+### 3. Reporter les résultats
+
+Pour reporter les résultats d'une ANCOVA :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Après ajustement des scores post-test par la covariable (score pré-test), on peut conclure qu'il y a un effet significatif du groupe : $F(2, 41) = 218.629, p < 0.001, 𝜂^2 = 0.91$.
+
+    -   On décrit les différences observées dans les tests post-hoc, en précisant la p-value ajustée associée aux différences notables. Ici, on a observé que les moyennes ajustées sont significativement différentes les unes des autres (p. adj. \< .001). Le score d'anxiété post-test est plus faible dans le groupe 3 par rapport aux groupes 1 et 2, et ce même score est plus faible dans le groupe 2 par rapport au groupe 1.
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, écart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée.
+
+```{r}
+#Graphe représentant les moyennes ajustées par la covariable
+pwc.anx2 <- pwc.anx2 %>% add_xy_position(x = "group", fun = "mean_se")
+ggline(get_emmeans(pwc.anx2), x = "group", y = "emmean") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.1) + 
+  stat_pvalue_manual(pwc.anx2, hide.ns = TRUE, tip.length = 0.01, 
+                     bracket.nudge.y = -0.5, step.increase = -0.05)
+
+
+```
+
+## ANCOVA à 2 facteurs
+
+**Jeu de données utilisé**
+
+On va utiliser le jeu de données `stress` pour illustrer cette analyse. Ce jeu de données se compose des score de 60 participants réparties selon deux variables inter-groupes, et pour lesquels on a mesuré le stress.
+
+Dans ce jeu de données, nous allons analyser l'impact des deux VI (`treatment` et `exercise`) sur ce score de stress, en contrôlant l'impact de la variable `age`. Autrement dit, la question est de savoir, en tenant compte de l'âge des participants, quel est l'impact du traitement et de l'exercice physique sur le stress.
+
+```{r}
+str(stress)
+glimpse(stress)
+```
+
+Ce jeu de données contient 5 colonnes :
+
+-   `id` : identifiant du participant
+
+-   `score` : mesure du stress
+
+-   `treatment` : traitement à deux modalités - avec vs. sans traitement
+
+-   `exercise` : intensité du programme d'exercice physique - faible vs. modéré vs. élevé
+
+-   `age` : âge des participants
+
+### 1. Vérification des conditions d'application
+
+#### Valeurs aberrantes
+
+Comme pour les ANOVA, on vérifie la présence de valeurs aberrantes dans chaque sous-groupe.
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+stress %>%
+  group_by(treatment, exercise) %>%
+  identify_outliers(score)
+
+stress %>%
+  group_by(treatment, exercise) %>%
+  identify_outliers(age)
+
+
+ggboxplot(stress, x = "treatment", y = "score", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "exercise")
+
+ggboxplot(stress, x = "treatment", y = "age", add = "jitter",
+          bxp.errorbar = TRUE, xlab = FALSE, color = "exercise")
+
+```
+
+**Interprétation** : Une valeur est identifiée comme étant extrême, mais on va la conserver.
+
+#### Normalité des distributions
+
+Comme pour les ANOVA, on vérifie la normalité dans chaque sous-groupe.
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+ggqqplot(stress, x = "score", facet.by = c("treatment", "exercise"))
+ggqqplot(stress, x = "age", facet.by = c("treatment", "exercise"))
+
+stress %>%
+  group_by(exercise, treatment) %>%
+  shapiro_test(score, age)
+
+```
+
+**Interprétation** : La VD et la covariable sont normalement distribuées (Shapiro, p \< .05).
+
+------------------------------------------------------------------------
+
+Comme il s'agit d'une ANOVA avec 2 facteurs inter-sujets, on peut vérifier la normalité de la distribution de la VD en utilisant les résidus du modèle (incluant la covariable). Cette technique est d'autant mieux car la normalité sera vérifiée en tenant compte de la covariable.
+
+```{r}
+# Construction du modèle - La covariable vient toujours en premier, et on ajoute la VI avec le signe + (et non le signe *)
+
+model <- lm(score ~ age + treatment * exercise, data = stress)
+
+ggqqplot(residuals(model))
+
+shapiro_test(residuals(model))
+```
+
+#### Homoscédasticité
+
+Contrairement aux ANOVA classiques dans lesquelles on vérifie l'homogénéité des variances sur la VD, l'hypothèse d'homoscédasticité suppose que les variances des résidus dans chaque groupe sont homogènes.
+
+Comme on doit vérifier l'homoscédasticité en fonction du groupe, on va d'abord ajouter les résidus à notre jeu de données, puis réaliser le test de Levene.
+
+```{r}
+# Ajout d'une colonne contenant les résidus du modèle
+stress <- cbind(stress, resid = residuals(model))
+
+stress %>% 
+  levene_test(resid ~ exercise * treatment)
+```
+
+**Interprétation :** Le test de Levene renvoie une p-value supérieure à .05, donc l'homoscédasticité est respectée.
+
+#### Linéarité de la covariable et de la VD
+
+Nous devons vérifier que pour chaque condition de la VI, la VD et la covariable ont une relation linéaire entre elles.
+
+```{r}
+# Méthode 1 : Calcul des coefficients de corrélation entre la VD et la covariable dans chaque groupe
+stress %>%
+  group_by(exercise, treatment) %>%
+  cor_test(score, age)
+
+```
+
+```{r, fig.show='hold', fig.asp=1, fig.width= 4.5}
+# Méthode 2 : Faire un graphique en nuage de points (scatterplot), et tracer les droites de régression
+ggscatter(stress, x = "age", y = "score",
+  facet.by  = c("exercise", "treatment"), add = "reg.line")+
+  stat_smooth(method = "loess", span = 0.9)
+```
+
+#### Homogénéité des pentes de régression
+
+Cette condition revient à vérifier qu'il n'y a pas d'interaction entre la covariable et la VI. Autrement dit, on doit avoir une relation similaire entre la VD et la covariable, à tous les niveaux de la VI.
+
+Cela revient à examiner s'il existe un effet d'interaction entre la covariable et la VI.
+
+```{r}
+# Homogénéité des pentes : ANOVA(VD ~ VI * COV)
+anova_test(stress, score ~ treatment * exercise * age)
+```
+
+**Interprétation** : Comme il n'y a pas d'effet d'interaction entre les VI et la covariable, on peut confirmer que les pentes de régression sont homogènes. La condition est donc vérifiée.
+
+### 2. Réalisation de l'ANCOVA
+
+On va utiliser la fonction `anova_test()` qui est plus facile à utiliser pour réaliser une ANCOVA.
+
+**Si vous utilisez la version avec la formule,** il faudra être bien vigilant à mettre la covariable en 1er dans la liste des VI et la séparer d'un signe `+` et non d'un signe `*`.\
+[Syntaxe :]{.underline} `VD ~ COV + VI * VI`.
+
+```{r}
+
+# Version avec la formule
+res.str <- anova_test(stress, score ~ age + treatment * exercise)
+res.str
+
+# Version avec les argument
+res.str <- anova_test(stress, dv = "score", covariate = "age", between = c("treatment", "exercise"))
+res.str
+```
+
+**Interprétation** : Après avoir contrôlé l'impact de la covariable sur le score pré-test, on peut conclure qu'il y a un effet significatif du traitement et un effet significatif de l'exercice physique, ainsi qu'un effet d'interaction Traitement x Exercice.
+
+[Passons maintenant aux **tests post-hoc** :]{.underline}
+
+Pour les tests post-hoc, on va utiliser la fonction `emmeans_test()` qui permet de réaliser les comparaisons deux à deux sur des **moyennes marginales corrigées** (c'est-à-dire des moyennes ajustées en tenant compte de l'impact de la covariable).
+
+```{r}
+# Effet d'interaction : Comparaisons 2 à 2 avec covariable
+pwc1.str <- stress %>% 
+  group_by(treatment) %>%
+  emmeans_test(
+    score ~ exercise, covariate = age)
+pwc1.str
+
+pwc2.str <- stress %>% 
+  group_by(exercise) %>%
+  emmeans_test(
+    score ~ treatment, covariate = age)
+pwc2.str
+
+# Effet principal de l'exercice physique
+pwc3.str <- stress %>% 
+  emmeans_test(
+    score ~ exercise, covariate = age)
+pwc3.str
+
+# Effet principal du traitement (permet juste d'obtenir les moyennes ajustées)
+pwc4.str <- stress %>% 
+  emmeans_test(
+    score ~ exercise, covariate = age)
+pwc4.str
+```
+
+**Interprétation** : Les comparaisons deux à deux nous permettent de conclure, qu'après contrôle de la covariable, les différences sont significatives entre le groupe `high` et les groupes `low` et `moderate`, seulement lorsqu'ils ont le traitement (`yes`). Aussi, la différence entre avec et sans traitement est significative uniquement dans la modalité d'exercice physique élevée (`high`)
+
+Pour obtenir la valeur des moyennes corrigées, on peut utiliser la fonction `get_emmeans()`.
+
+```{r}
+get_emmeans(pwc1.str)
+get_emmeans(pwc2.str)
+get_emmeans(pwc3.str)
+get_emmeans(pwc4.str)
+```
+
+### 3. Reporter les résultats
+
+Pour reporter les résultats d'une ANCOVA :
+
+-   On décrit les différences observées et on donne le résultat de l'analyse statistique avec la formule récapitulative dans le texte :
+    -   Après avoir contrôlé l'influence de l'âge sur les scores de stress ($F(1, 53) = 9.110, p < 0.01, 𝜂^2 = 0.15$), on peut conclure qu'il y a :\
+        Effet principal du Traitement : $F(1, 53) = 11.096, p < 0.01, 𝜂^2 = 0.17$,\
+        Effet principal de l'Exercice : $F(2, 53) = 20.820, p < 0.001, 𝜂^2 = 0.44$,\
+        Effet d'interaction : $F(2, 53) = 4.446, p < 0.05, 𝜂^2 = 0.14$.
+
+    -   On décrit les différences observées dans les tests post-hoc, en précisant la p-value ajustée associée aux différences notables. Ici, on a observé que le score moyen ajusté par l'âge diminue significativement avec le traitement que lorsqu'il s'accompagne d'une activité physique intense (par rapport à une activité faible à modérée).
+-   On peut aussi reporter cette information dans un tableau décrivant les données (par ex : moyenne, écart-type, résultat ANOVA + post-hoc).
+-   Une représentation graphique sur laquelle on indique les différences significatives est aussi appréciée.
+
+```{r}
+#Graphe représentant les moyennes ajustées par la covariable
+pwc2.str <- pwc2.str %>% add_xy_position(x = "exercise", fun = "mean_se")
+pwc1.str <- pwc1.str %>% add_xy_position(x = "exercise", fun = "mean_se")
+ggline(get_emmeans(pwc2.str), x = "exercise", y = "emmean", color = "treatment") +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high, color = treatment), width = 0.1) + 
+  stat_pvalue_manual(
+  pwc2.str, hide.ns = TRUE, tip.length = 0, bracket.size = 0, bracket.nudge.y = -6) + 
+  stat_pvalue_manual( pwc1.str, hide.ns = TRUE, tip.length = 0.05, 
+                      step.group.by = "treatment", color = "treatment")
+```
+
+# Comparaison de moyennes avec plusieurs variables dépendantes
+
+**L'Analyse Multivariée de la variance (MANOVA)** est un type d'ANOVA qui est utilisée dans le cas où on a plusieurs VD à examiner (les VD doivent mesurer différents aspects du phénomène à étudier).\
+En effet, le fait de répéter plusieurs tests augmente le risque d'erreur (car on réalise plusieurs tests sur les mêmes données). De plus, la MANOVA permet de prendre en compte de la covariation des différentes VD.
+
+**Jeu de données utilisé**
+
+Pour cet exemple, on va utiliser le jeu de données `iris`, qui contient 150 observations de trois espèces d'iris, et se compose de 5 colonnes :
+
+-   `Sepal.Length` : Longueur des sépales
+
+-   `Sepal.Width` : Largeur des sépales
+
+-   `Petal.Length` : Longueur des pétales
+
+-   `Petal.Width` : Largeur des pétales
+
+-   `Species` : Espèce d'iris (setosa, virginica, versicolor)
+
+```{r}
+iris2 <- cbind(id = 1:nrow(iris), iris)
+head(iris2)
+```
+
+Pour l'exemple, on va s'intéresser aux variables `Sepal.Length` et `Petal.Length` en fonction du groupe `Species`.
+
+## 1. Vérification des conditions d'application
+
+La MANOVA a un certain nombre de conditions d'application :
+
+1.  **Indépendance des observations :** Les MANOVA ne concernent pas les mesures répétées. Chaque individu n'est affecté qu'à une modalité de la VI testée
+2.  **Absence de valeurs aberrantes univariées et multivariées**
+3.  **Normalité univariée et multivariée des distributions**
+4.  **Multicollinéarité et Linéarité** : Il doit exister une relation linéaire entre les variables dépendantes, qui ne doit pas être ni trop forte, ni trop faible.
+5.  **Homogénéité des variances**
+6.  **Homogénéité des matrices de variance-covariance**
+
+### Valeurs aberrantes univariées et multivariées
+
+On va vérifier l'absence de valeurs aberrantes pour chaque VD (**univariées**), en fonction du groupe. Pour cela, on utilise la même procédure que pour une ANOVA classique :
+
+```{r}
+# Boite à moustache
+ggboxplot(
+  iris2, x = "Species", y = c("Sepal.Length", "Petal.Length"), 
+  merge = TRUE, palette = "jco"
+  )
+
+#Identify_outliers()
+iris2 %>%
+  group_by(Species) %>%
+  identify_outliers(Sepal.Length)
+
+iris2 %>%
+  group_by(Species) %>%
+  identify_outliers(Petal.Length)
+```
+
+**Interprétation** : Pas de valeurs aberrantes extrêmes, on peut poursuivre.
+
+On va aussi vérifier la présence de valeurs aberrantes **multivariées**, qui sont des points dont les valeurs sur les deux VD ont une combinaison aberrante. Autrement dit, les valeurs pour chaque VD d'un individu sont trop éloignées ou trop proches par rapport au reste de l'échantillon.
+
+Pour cela, on utilise un indicateur de la distance entre une observation et le reste de l'échantillon, en l'occurrence, la **distance de Mahalanobis**, qui traduit donc l'éloignement d'une observation par rapport à la tendance du reste de l'échantillon
+
+```{r}
+# Aperçu du rendu de la fonction
+iris2 %>%
+  select(Species, Sepal.Length, Petal.Length) %>%
+  group_by(Species) %>%
+  mahalanobis_distance() %>%
+  head()
+  
+iris2 %>%
+  select(Species, Sepal.Length, Petal.Length) %>%
+  group_by(Species) %>%
+  mahalanobis_distance() %>% 
+  filter(is.outlier == TRUE) %>%
+  as.data.frame()
+```
+
+### Normalité univariée et multivariée
+
+Pour la normalité univariée, on utilise la procédure classique avec le test de Shapiro, et pour la normalité multivariée, on utilise une variante de cette fonction : `mshapiro()`
+
+```{r}
+#Normalité univariée
+iris2 %>%
+  group_by(Species) %>%
+  shapiro_test(Sepal.Length, Petal.Length) %>%
+  arrange(variable)
+
+ggqqplot(iris2, "Sepal.Length", facet.by = "Species",
+         ylab = "Sepal Length", ggtheme = theme_bw())
+ggqqplot(iris2, "Petal.Length", facet.by = "Species",
+         ylab = "Petal Length", ggtheme = theme_bw())
+
+#Normalité multivariée
+iris2 %>%
+  select(Sepal.Length, Petal.Length) %>%
+  mshapiro_test()
+```
+
+### Multicollinéarité et linéarité entre les VD
+
+Au global, on va contrôler la corrélation entre les deux VD pour vérifier si elles ne sont pas trop corrélées (r \< .90). Sinon, il y aura multicollinéarité : dans ce cas, il faudra envisager de supprimer une des deux VD.
+
+Si la corrélation est trop faible, la MANOVA n'est plus justifiée (pas assez de lien entre les VD), et il faudra faire deux ANOVA séparées.
+
+On calcule le coefficient de corrélation de Pearson pour déterminer la corrélation entre les deux VD. Ici, on obtient une corrélation de .87, ce qui est bon pour faire une MANOVA.
+
+```{r}
+iris2 %>% cor_test(Sepal.Length, Petal.Length)
+```
+
+Pour vérifier la **linéarité**, il faut qu'il y ait une relation linéaire entr les deux VD pour chaque modalité de la VI (donc, en fonction du groupe). On peut utiliser la fonction `ggpairs()` pour visualiser graphiquement la relation entre les deux VD par groupe, ou tout simplement faire un `cor_test()` en fonction du groupe.
+
+```{r}
+results <- iris2 %>%
+  select(Sepal.Length, Petal.Length, Species) %>%
+  group_by(Species) %>%
+  doo(~ggpairs(.) + theme_bw(), result = "plots")
+results$plots
+
+iris2 %>% 
+  group_by(Species) %>%
+  cor_test(Sepal.Length, Petal.Length)
+```
+
+### Homogénéité des variances 
+
+On utilise le test de Levene pour tester l'homogénéité des variances
+
+```{r}
+iris2 %>%
+  levene_test(Petal.Length ~ Species)
+iris2 %>%
+  levene_test(Sepal.Length ~ Species)
+```
+
+**Interprétation** : Ici, nous n'avons pas d'homogénéité des variances. Il faudra être vigilant sur la MANOVA et quoi qu'il en soit faire une ANOVA de Welch en post-hoc pour compenser ce problème.
+
+### Homogénéité des matrices de variance-covariance
+
+Pour tester cette hypothèse, on utilise le test de Box-M : l'hypothèse est respectée lorsque la p-value est supérieure à .05
+
+```{r}
+box_m(iris2[, c("Sepal.Length", "Petal.Length")], iris2$Species)
+```
+
+**Interprétation** : Ici, nous n'avons pas d'homogénéité des matrices de variance-covariance. Lorsqu'on a des échantillons équilibrés (même effectif dans chaque modalité de la VI), ce n'est pas très grave et on peut poursuivre l'analyse. Si, en revanche, les échantillons sont déséqulibrés, on utilisera une autre statistique de test pour la MANOVA (trace de Pillai au lieu du lambda de Wilks).
+
+## 2. Réalisation de l'analyse
+
+Pour faire une MANOVA, on crée un modèle linéaire avec nos VD et nos VI avec la syntaxe suivante : `cbind(VD, ..., VD) ~ VI`. On applique ensuite la fonction `Manova()` sur le modèle qui en résulte pour examiner les résultats de l'analyse multivariée.
+
+```{r}
+#Construction du modèle
+model <- lm(cbind(Sepal.Length, Petal.Length) ~ Species, iris2)
+
+#Réalisation de la MANOVA
+  # Avec la trace de Pillai
+Manova(model, test.statistic = "Pillai")
+
+  #Avec le lambda de Wilks
+Manova(model, test.statistic = "Wilks")
+```
+
+**Interprétation** : On voit que le facteur `Species` est significatif, on peut donc conclure de l'effet de la variable sur la combinaison des variables dépendantes.
+
+Pour rapporter cette analyse, on indiquera que la MANOVA a mis en évidence un effet significatif (F(4, 294) = 71.829, p \< .001)
+
+**Passons aux tests post-hocs :**
+
+1.  **Faire une ANOVA pour chaque VD, en abaissant le seuil de significativité.** Au lieu d'utiliser p \< .05, on utilise un seuil plus strict déterminé par le nombre de tests. On divise .05 par le nombre de tests (ici 2) pour obtenir un nouveau seuil (ici, .05/2 = 0.25)
+
+```{r}
+# On utilise la fonction gather() pour rassembler les VD dans une même colonne (et on ajoute une colonne pour spécifier si c'est l'une ou l'autre)
+grouped.data <- iris2 %>%
+  gather(key = "variable", value = "value", Sepal.Length, Petal.Length) %>%
+  group_by(variable)
+
+# test ANOVA de Welch à un facteur --> Non-homogénéité
+grouped.data %>% welch_anova_test(value ~ Species)
+
+# test ANOVA à un facteur --> Homogénéité
+grouped.data %>% anova_test(value ~ Species)
+
+
+```
+
+**Interprétation** : Nos effets sont largement inférieur à notre seuil .025, nous pouvons donc conclure qu'il y a bien un effet principal de la variable `Species` sur chaque des VD testées.
+
+2.  **Réaliser les comparaisons deux à deux pour chaque VD**.
+
+```{r}
+# Si Homogénéité (pairwise t-test)
+pwc1 <- iris2 %>%
+  gather(key = "variables", value = "value", Sepal.Length, Petal.Length) %>%
+  group_by(variables) %>%
+  pairwise_t_test(value ~ Species) 
+pwc1
+
+# Si Non-Homogénéité (Games-Howell)
+pwc <- iris2 %>%
+  gather(key = "variables", value = "value", Sepal.Length, Petal.Length) %>%
+  group_by(variables) %>%
+  games_howell_test(value ~ Species) 
+pwc
+```
+
+**Interprétation** : On a bien une différence significative entre toutes les modalités de la variables `Species`, et ce, pour les deux VD testées. On rapportera les résultats des deux tests post-hoc de la même manière que pour une ANOVA classique (indiquer les F des Anova univairées + les résultats des comparaisons deux à deux.
+
+```{r}
+pwc <- pwc %>% add_xy_position(x = "Species")
+
+ggboxplot(iris2, x = "Species", y = c("Sepal.Length", "Petal.Length"), 
+  merge = TRUE, palette = "jco") + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE, tip.length = 0, 
+    step.increase = 0.1, step.group.by = "variables",
+    color = "variables")
+```

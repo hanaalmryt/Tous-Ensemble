@@ -1,0 +1,59 @@
+"0","knitr::opts_chunk$set(echo = TRUE,"
+"0","                      warning = FALSE)"
+"0","options(tibble.width = Inf) # displays all columns."
+"0","options(tibble.print_max = Inf) # to show all the rows."
+"0","library(broom)"
+"2","G2;H2;Avis h: le package ‘broom’ a été compilé avec la version R 4.3.3g
+"
+"0","library(car)"
+"2","G2;H2;Avis h: le package ‘car’ a été compilé avec la version R 4.3.3g
+"
+"2","G3;Le chargement a nécessité le package : carData
+g"
+"2","G2;H2;Avis h: le package ‘carData’ a été compilé avec la version R 4.3.3g
+"
+"2","G3;
+Attachement du package : ‘car’
+
+g"
+"2","G3;L'objet suivant est masqué depuis ‘package:psych’:
+
+    logit
+
+g"
+"2","G3;L'objet suivant est masqué depuis ‘package:purrr’:
+
+    some
+
+g"
+"2","G3;L'objet suivant est masqué depuis ‘package:dplyr’:
+
+    recode
+
+g"
+"0","library(emmeans)"
+"0","library(rstatix)"
+"0","library(datarium)"
+"2","G2;H2;Avis h: le package ‘datarium’ a été compilé avec la version R 4.3.3g
+"
+"0","library(tidyverse)"
+"0","library(ggpubr)"
+"2","G2;H2;Avis h: le package ‘ggpubr’ a été compilé avec la version R 4.3.3g
+"
+"0","library(psych)"
+"0","library(GGally)"
+"2","G2;H2;Avis h: le package ‘GGally’ a été compilé avec la version R 4.3.3g
+"
+"2","G3;Registered S3 method overwritten by 'GGally':
+  method from   
+  +.gg   ggplot2
+g"
+"2","G3;
+Attachement du package : ‘GGally’
+
+g"
+"2","G3;L'objet suivant est masqué depuis ‘package:emmeans’:
+
+    pigs
+
+g"
